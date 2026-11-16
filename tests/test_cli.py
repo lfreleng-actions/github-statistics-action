@@ -23,7 +23,6 @@ def _plain(text: str) -> str:
     return _ANSI.sub("", text)
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize("flag", ["--version", "-V"])
 def test_version_flag_prints_version(flag: str) -> None:
     """The version flag prints the package version and exits 0."""
@@ -35,7 +34,6 @@ def test_version_flag_prints_version(flag: str) -> None:
     assert github_statistics.__version__ in _plain(result.output)
 
 
-@pytest.mark.xfail(strict=True)
 def test_no_arguments_prints_help() -> None:
     """Running with no arguments prints the help text."""
     from github_statistics.cli import app
@@ -47,7 +45,6 @@ def test_no_arguments_prints_help() -> None:
     assert "--version" in output
 
 
-@pytest.mark.xfail(strict=True)
 def test_module_entry_point_prints_version() -> None:
     """``python -m github_statistics --version`` prints the version."""
     result = subprocess.run(
