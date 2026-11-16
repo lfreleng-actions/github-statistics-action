@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Linux Foundation
+
+[build-system]
+requires = ["hatchling>=1.24", "hatch-vcs>=0.5.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "github-statistics"
+dynamic = ["version"]
+description = "Daily, visual activity statistics for GitHub organisations and repositories"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+  { name = "The Linux Foundation", email = "mwatkins@linuxfoundation.org" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development",
+  "Typing :: Typed",
+]
+dependencies = [
+  "httpx[http2]==0.28.1",
+  "typer==0.29.1",
+  "rich==15.0.0",
+  "jinja2==3.1.6",
+  "jsonschema==4.26.0",
+  "matplotlib==3.11.2",
+  "numpy==2.4.6",
+  "pillow==13.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/lfreleng-actions/github-statistics-action"
+Repository = "https://github.com/lfreleng-actions/github-statistics-action"
+Issues = "https://github.com/lfreleng-actions/github-statistics-action/issues"
+
+[project.scripts]
+github-statistics = "github_statistics.cli:app"
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.2.0",
+  "pytest-asyncio==1.5.0",
+  "pytest-cov==7.1.0",
+  "respx==0.23.1",
+  "hypothesis==6.170.15",
+  "mypy==2.4.1",
+  "ruff==0.17.5",
+  "types-jsonschema==4.26.0.20261006",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==9.2.0",
+  "pytest-asyncio==1.5.0",
+  "pytest-cov==7.1.0",
+  "respx==0.23.1",
+  "hypothesis==6.170.15",
+  "mypy==2.4.1",
+  "ruff==0.17.5",
+  "types-jsonschema==4.26.0.20261006",
+]
+
+[tool.hatch.version]
+source = "vcs"
+raw-options.local_scheme = "no-local-version"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/github_statistics/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/github_statistics"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "LICENSE*", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = ["-v", "--tb=short"]
+
+[tool.coverage.run]
+source = ["github_statistics"]
+omit = ["tests/*"]
+data_file = "${TEMP-/tmp}/.coverage.github-statistics"
+
+# The mypy and basedpyright hooks run in isolated environments without
+# this project's dependencies, so missing imports are not errors there.
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+exclude = ["src/github_statistics/_version\\.py$"]
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+pythonVersion = "3.11"
+reportMissingImports = false
+reportMissingModuleSource = false
+reportMissingTypeStubs = false
+exclude = ["src/github_statistics/_version.py"]
