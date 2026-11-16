@@ -25,12 +25,32 @@ The link to the published site will appear here once the site goes live.
 
 The project is at the design stage: the
 [design document](docs/DESIGN.md) describes the tool, the action and
-the site, and records the decisions taken. No code or action inputs
-exist yet.
+the site, and records the decisions taken. The Python package and a
+command line skeleton that prints its version exist; the action has
+no inputs yet.
 
-The next step is phases 1 and 2 of the design's delivery plan (§13):
-a rendering spike on synthetic data, then the package scaffold with
-its command line, configuration, store and release pipeline.
+The next step is the rest of phases 1 and 2 of the design's delivery
+plan (§13): a rendering spike on synthetic data, then the
+configuration, store and release pipeline.
+
+## Development
+
+The project uses [uv](https://docs.astral.sh/uv/) and needs Python
+3.11 or later. Install the locked dependencies and run the tests:
+
+```bash
+uv sync
+uv run pytest
+uv run github-statistics --version
+```
+
+Install the commit hooks with [prek](https://prek.j178.dev/), then
+run them against the files a change touches:
+
+```bash
+prek install -t pre-commit -t commit-msg
+prek run --files <files>
+```
 
 [pre-commit.ci results page]: https://results.pre-commit.ci/latest/github/lfreleng-actions/github-statistics-action/main
 [pre-commit.ci status badge]: https://results.pre-commit.ci/badge/github/lfreleng-actions/github-statistics-action/main.svg
