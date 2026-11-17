@@ -63,11 +63,14 @@ that `.github/hooks/manifest-guard.sh` keeps inert until a `go.mod` or
 
 Adopt: the hook set as the template ships it, `.gitlint`, the
 `testing.yaml` shape with `harden-runner-block-action` and the org
-allow-list, the `release-drafter`/`release.yaml` pair, and the
-template's local-action reference convention (`uses: $/`). The Go and
-ESLint hooks and their configuration stay: they cost nothing while no
-manifest exists, the template tests their guard, and removing them
-would make this repository drift from the canonical template.
+allow-list, `release-drafter.yaml`, and the template's local-action
+reference convention (`uses: $/`). The template's `release.yaml` goes:
+it fires on the same tag pushes as the Python package's
+`build-test-release.yaml` (§4.1) and would race it to promote the draft
+release. The Go and ESLint hooks and their configuration stay: they
+cost nothing while no manifest exists, the template tests their guard,
+and removing them would make this repository drift from the canonical
+template.
 
 Improve, across the first pull requests:
 

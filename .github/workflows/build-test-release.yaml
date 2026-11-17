@@ -1,0 +1,112 @@
+---
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Linux Foundation
+
+# Runs on a tag push: builds, tests and promotes the release, then
+# publishes to Test PyPI and PyPI.
+#
+# PyPI publishing runs HERE, not in the reusable workflow. PyPI trusted
+# publishing matches the OIDC job_workflow_ref claim against this
+# repository, so the publish jobs must live in this caller. The reusable
+# `release` job builds, tests, audits, attaches artefacts and promotes the
+# draft release; the `test-pypi` and `pypi` jobs below then publish the
+# run-scoped build artefact it produced, using the `tag` output it exposes.
+name: 'Python Build/Test/Release'
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    tags:
+      - '**'
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Harden-runner egress allow-list for the caller-owned publish jobs below.
+  # yamllint disable-line rule:line-length
+  HARDEN_RUNNER_ALLOWLIST: 'lfreleng-actions//.github/harden-runner/lfreleng-actions/allow_list.txt@6d4a65c5601afd6c2fbe52bda4b0024b132f265d'  # v0.19.0
+
+jobs:
+  release:
+    name: 'Build/Test/Release'
+    permissions:
+      contents: write       # Create the GitHub release / attach assets
+      id-token: write       # OIDC for build provenance attestations
+      attestations: write   # Build provenance attestations
+    # yamllint disable-line rule:line-length
+    uses: lfreleng-actions/python-workflows/.github/workflows/build-test-release.yaml@e6e1ea99f84dc0993a14759c749555268a393cab  # v0.6.0
+
+  test-pypi:
+    name: 'Test PyPI Publishing'
+    needs: release
+    runs-on: 'ubuntu-latest'
+    # MUST match the environment on the Test PyPI trusted publisher.
+    environment:
+      name: development
+    permissions:
+      contents: read
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+    timeout-minutes: 5
+    steps:
+      - name: 'Load egress allow-list (block mode)'
+        # yamllint disable-line rule:line-length
+        uses: lfreleng-actions/harden-runner-block-action@bd83615a22b57835798adcb9ce753161464dfb40  # v0.16.2
+        with:
+          config: ${{ env.HARDEN_RUNNER_ALLOWLIST }}
+
+      - name: 'Harden runner (block)'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            ${{ env.CONNECTION_ALLOW_LIST }}
+
+      - name: 'Test PyPI publishing'
+        # yamllint disable-line rule:line-length
+        uses: lfreleng-actions/pypi-publish-action@7313989417f699c9e11e9f992f07b4e9749e25c3  # v0.2.3
+        with:
+          environment: development
+          tag: ${{ needs.release.outputs.tag }}
+          trusted_publishing: 'true'
+
+  pypi:
+    name: 'Release PyPI Package'
+    needs:
+      - release
+      - test-pypi
+    runs-on: 'ubuntu-latest'
+    # MUST match the environment on the PyPI trusted publisher.
+    environment:
+      name: production
+    permissions:
+      contents: read
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+    timeout-minutes: 5
+    steps:
+      - name: 'Load egress allow-list (block mode)'
+        # yamllint disable-line rule:line-length
+        uses: lfreleng-actions/harden-runner-block-action@bd83615a22b57835798adcb9ce753161464dfb40  # v0.16.2
+        with:
+          config: ${{ env.HARDEN_RUNNER_ALLOWLIST }}
+
+      - name: 'Harden runner (block)'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            ${{ env.CONNECTION_ALLOW_LIST }}
+
+      - name: 'PyPI release'
+        # yamllint disable-line rule:line-length
+        uses: lfreleng-actions/pypi-publish-action@7313989417f699c9e11e9f992f07b4e9749e25c3  # v0.2.3
+        with:
+          environment: production
+          tag: ${{ needs.release.outputs.tag }}
+          trusted_publishing: 'true'
+          attestations: true

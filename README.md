@@ -52,5 +52,8 @@ prek install -t pre-commit -t commit-msg
 prek run --files <files>
 ```
 
+CI runs `build-test.yaml` on pull requests, and `build-test-release.yaml`
+builds, tests and publishes to TestPyPI then PyPI on a tag push.
+
 [pre-commit.ci results page]: https://results.pre-commit.ci/latest/github/lfreleng-actions/github-statistics-action/main
 [pre-commit.ci status badge]: https://results.pre-commit.ci/badge/github/lfreleng-actions/github-statistics-action/main.svg
