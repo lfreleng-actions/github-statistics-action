@@ -284,7 +284,9 @@ src/github_statistics/
   store/          sqlite.py: schema, transactions, queries
   collect/        sync per metric, budget.py, coverage.py
   series/         daily.py, identity.py, leaderboard.py, coverage.py
-  render/         bars3d.py (chart), palette.py, images.py (derivatives)
+  render/         model.py (ChartSpec, Style), layout.py (plan_chart),
+                  bars3d.py (chart), palette.py, images.py
+                  (derivatives), demo.py (synthetic data)
   site/           templates/ (Jinja2), assets/ (CSS), build.py
   export/         json.py, csv.py
 ```
@@ -312,6 +314,7 @@ github-statistics site     HTML from the store and charts, no network
 github-statistics export   daily series and leaderboards as JSON/CSV
 github-statistics doctor   token, rate limit, scope, unclassified bots,
                            store health
+github-statistics demo     sample charts from synthetic data, no token
 github-statistics config   show | check | path
 github-statistics cache    info | clear [--owner]
 ```
@@ -783,30 +786,42 @@ ever hidden that should show.
 
 ### 8.2 Geometry
 
-For a plotting width `W` and `N` days, the pitch is `p = W / N`; bar
-width `0.62 p`; the depth vector `d = (0.45 p, 0.26 p)` in pixels (a
-cabinet-style projection at about 30°). Day `i`'s front-row bar stands
-at `x = i p`; its back-row bar at `x + d`. With `N = 365` and
-`W ≈ 3,450 px` at 4K, `p ≈ 9.5 px` and bars are about 6 px wide;
-downscaled to 1920 px (a 2× reduction) they are 3 px wide and still
-separate. A bar's
-three faces take one base colour at three luminance factors (top 1.15,
-front 1.0, side 0.78); a 1 px lighter edge on the top face and a soft,
-translucent floor shadow offset along `d` lift the bars off the plane.
+The renderer works in pixel coordinates on a full-figure axes at the
+master size, 3840×2160 (`figsize` 16×9 in at 240 dpi). The plot area
+runs from x = 280 to `W - 210` and from y = 300 to `H - 350`. For a
+plot width `P` and `N` days the pitch is `p = P / N`; bar width
+`0.62 p`; the depth vector `d = (0.75 p, 0.45 p)` in pixels. Short
+windows cap the `p` that `d` follows at 64 px, so the floor and wall
+stay inside the right margin. Day `i`'s front-row bar stands at
+`x = 280 + i p`; its back-row bar at `x + d`. With `N = 365`,
+`p ≈ 9.2 px` and bars are about 6 px wide; downscaled to 1920 px they
+are 3 px wide and still separate. A bar's three faces take one base
+colour at three luminance factors (top 1.22, clamped to 1; front 1.0;
+side 0.74), each with a 0.5 px edge at 0.62, and a soft, translucent
+floor shadow to the right of each bar, `min(0.09 h, 2.5 p)` long,
+lifts the bars off the plane. Each row is one `PolyCollection`, drawn
+back row first.
 
 Per day: the larger of the two values goes to the back row and the
 smaller to the front; on a tie, the series configured as `back_on_tie`
 (default: "closed", "jobs") goes to the back. Colours belong to the
 series, never to the row, so a swap is visible as a colour swap.
 
-Composition at 3840×2160 (`figsize` 16×9 in at 240 dpi):
+Composition:
 
 - Title (owner, metric, series pair) and a subtitle line (window, day
-  count, repository count, actor class, generation date).
-- A floor plane with month boundaries and labels, and weekly minor
-  ticks; a back wall with horizontal gridlines at round values.
-- Legend with 3D swatches; a footer with coverage, tool version, and
-  the scope rule in words.
+  count, repository count, actor class, generation date) at top left.
+- A floor plane reaching back `2.8 d` from the baseline, with month
+  separators and `Mon YYYY` labels centred under each month (every
+  second or third month on long windows, so labels never collide); a
+  back wall standing on the floor's far edge with white gridlines at
+  round values (1, 2, 2.5 or 5 × 10ⁿ, about six lines). The top tick
+  sets the vertical scale.
+- Legend with 3D swatches at top right; one annotation per series
+  marking its highest day (`value · D Mon`), placed above that bar
+  and any taller bar beneath the label, or left of the legend when it
+  would reach into it; a footer with coverage, tool version, and the
+  scope rule in words.
 - Default palette: Okabe–Ito pairs, colour-blind safe and distinct when
   swapped: opened `#0072B2` / closed `#E69F00`; runs `#009E73` / jobs
   `#CC79A7`; succeeded `#009E73` / failed `#D55E00`. Overridable per
@@ -817,11 +832,12 @@ Composition at 3840×2160 (`figsize` 16×9 in at 240 dpi):
 ### 8.3 Gap days
 
 A day whose coverage is partial or none gets no bars; instead a
-hatched, translucent column spans the full chart height at that day's
-position, in neutral grey, with a legend entry "no data" or "partial
-data". A zero day, by contrast, shows the bare floor. The distinction is
-the whole point of the coverage table: a chart must never let a failed
-run masquerade as a quiet day.
+hatched, translucent slab in neutral grey rises from the baseline to
+the top of the wall at that day's position, following the depth
+vector. The legend gains a "no data" or "partial data" entry when,
+and not before, such days exist. A zero day, by contrast, shows the
+bare floor. The distinction is the whole point of the coverage table:
+a chart must never let a failed run masquerade as a quiet day.
 
 ### 8.4 Outputs per chart
 
@@ -869,28 +885,32 @@ for any later interactive front end.
 
 ### 8.7 Spike result
 
-A throwaway prototype of §8.1 and §8.2 (matplotlib `Agg`, synthetic
-data with weekly seasonality, two bulk-merge spikes and four gap days)
-ran at 7680×4320, the target at the time. The design has since moved to
-4K (3840×2160), so the numbers below are upper bounds; phase 1 (§13)
-re-renders the prototype at 4K into `docs/design-spike/` for review.
+`github-statistics demo` renders the renderer of §8.1 to §8.4 on
+synthetic data: weekly seasonality, a slow drift, two bulk-merge
+spikes, four gap days and one partial day, for pull requests, issues
+and workflow runs.
 
-Measured on a laptop: 3.4 s wall clock for the 7680×4320 render
-including interpreter start-up; 594 KB for that PNG and 257 KB for the
-1920 px derivative, since flat fills compress well. A 4K master has a
-quarter of the pixels, so it renders faster and lands well under that
-size. Fifteen charts per target stay around a minute and well under a
-megabyte each (N1, N4 met).
+Measured on a GitHub-hosted Linux runner with
+`demo --days 365 --seed 7 --until 2026-11-16`: 0.62 to 0.65 s per
+chart for the 4K master plus its 1920 px derivative, and 2.4 s wall
+clock for all three charts including interpreter start-up. The
+masters weigh 310 to 320 KiB and the 1920 px derivatives 240 to
+251 KiB, since flat fills compress well. Fifteen charts per target
+stay well under a minute and under a megabyte each (N1, N4 met).
 
-What the prototype shows: the painter ordering holds with no artifacts;
-the smaller value stays visible in front on every day; a swap reads as a
-colour swap; gap days stand apart from zero days; month labels and
-gridlines survive the downscale. What it asks for in the real
-implementation: a deeper depth vector (`0.6 p` to `0.9 p` instead of
-`0.45 p`) and a taller floor so the third dimension still reads at
-1920 px, a tighter bottom margin, and a faint vertical gradient on the
-front face to soften the flat fill. The spike in §13 phase 1 settles
-those values on real data before the final renderer takes shape.
+![Pull requests opened and closed, 365 days, 1920 px derivative](design-spike/pull-requests-1920.png)
+
+A 1920×1080 crop of the 4K master around its busiest month, October:
+
+![Crop of the 4K master around October](design-spike/pull-requests-crop.png)
+
+The painter ordering holds with no artifacts; the smaller value stays
+visible in front on every day; a swap reads as a colour swap; gap days
+stand apart from zero days; month labels and gridlines survive the
+downscale. The prototype's depth vector of `0.45 p` vanished at
+1920 px, hence `0.75 p`; it also had too tall a bottom margin. Flat
+fills keep the files small, so the renderer adds no gradients or
+textures.
 
 ## 9. Operations
 
