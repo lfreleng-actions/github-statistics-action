@@ -12,8 +12,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.xfail(strict=True, reason="configuration not implemented")
-
 IDENTITY_KEYS = ("org_bots", "external_bots", "members", "member_orgs", "ignore_logins")
 
 
