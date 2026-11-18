@@ -56,7 +56,6 @@ _pairs = st.integers(min_value=1, max_value=60).flatmap(
 )
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 @given(_pairs)
 def test_row_assignment_puts_the_larger_value_behind(
     case: tuple[list[int], list[int], str],
@@ -79,7 +78,6 @@ def test_row_assignment_puts_the_larger_value_behind(
             assert back.series == tie
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_ticks_are_round_and_cover_the_peak() -> None:
     """Ticks start at zero, step by a round amount and reach the largest covered value."""
     from github_statistics.render import plan_chart
@@ -90,7 +88,6 @@ def test_ticks_are_round_and_cover_the_peak() -> None:
     assert plan.y_max == 150
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_thirty_day_render_draws_three_polygons_per_bar(tmp_path: Path) -> None:
     """Each non-zero bar on a covered day is three polygons; zero values draw none."""
     from github_statistics.render import render_chart
@@ -108,7 +105,6 @@ def test_thirty_day_render_draws_three_polygons_per_bar(tmp_path: Path) -> None:
     assert chart.legend == ("Opened", "Closed")
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_gap_days_draw_slabs_and_no_bars(tmp_path: Path) -> None:
     """Gap days draw a slab each run of days, no bars, and add their legend entries."""
     from github_statistics.render import Coverage, GapSpan, render_chart
@@ -133,7 +129,6 @@ def test_gap_days_draw_slabs_and_no_bars(tmp_path: Path) -> None:
     assert chart.legend == ("Opened", "Closed", "no data", "partial data")
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_legend_lists_only_the_gap_kinds_present() -> None:
     """A chart with only no-data days gains the "no data" entry alone."""
     from github_statistics.render import plan_chart
@@ -145,7 +140,6 @@ def test_legend_lists_only_the_gap_kinds_present() -> None:
     assert plan.legend == ("Opened", "Closed", "no data")
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_two_renders_are_byte_identical(tmp_path: Path) -> None:
     """Rendering one spec twice writes the same bytes."""
     from github_statistics.render import render_chart
@@ -162,7 +156,6 @@ def test_two_renders_are_byte_identical(tmp_path: Path) -> None:
     assert a.path.read_bytes() == b.path.read_bytes()
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_ambient_rc_settings_do_not_change_the_output(tmp_path: Path) -> None:
     """A caller's rcParams, such as a tight bbox, leave the PNG unchanged."""
     import matplotlib
@@ -182,7 +175,6 @@ def test_ambient_rc_settings_do_not_change_the_output(tmp_path: Path) -> None:
     assert ambient.path.read_bytes() == clean.path.read_bytes()
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_render_writes_a_png_at_the_exact_path(tmp_path: Path) -> None:
     """The PNG lands at the path given, whatever its suffix."""
     from PIL import Image
@@ -198,7 +190,6 @@ def test_render_writes_a_png_at_the_exact_path(tmp_path: Path) -> None:
     assert not (tmp_path / "chart.png").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_master_is_4k_and_derivatives_have_the_requested_width(tmp_path: Path) -> None:
     """The master is exactly 3840x2160; each derivative is named and sized by its width."""
     from PIL import Image
@@ -218,7 +209,6 @@ def test_master_is_4k_and_derivatives_have_the_requested_width(tmp_path: Path) -
             assert image.size == (width, width * 9 // 16)
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_derivative_wider_than_master_is_rejected(tmp_path: Path) -> None:
     """Upscaling is refused."""
     from github_statistics.render import render_chart, write_derivatives
@@ -229,7 +219,6 @@ def test_derivative_wider_than_master_is_rejected(tmp_path: Path) -> None:
         write_derivatives(chart.path, [chart.width + 1])
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 @pytest.mark.parametrize(
     ("first", "second", "coverage", "polygons", "slabs"),
     [
@@ -262,7 +251,6 @@ def test_edge_cases_render(
     assert chart.plan.y_max > 0
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 @pytest.mark.parametrize("peak_day", [0, 180, 322, 364])
 def test_peak_labels_clear_the_legend(tmp_path: Path, peak_day: int) -> None:
     """Peak labels clear a four-entry legend and each other, even on the last days."""
@@ -289,7 +277,6 @@ def test_peak_labels_clear_the_legend(tmp_path: Path, peak_day: int) -> None:
     assert not one.overlaps(two)
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 @pytest.mark.parametrize("days", [30, 365])
 def test_peak_labels_clear_taller_neighbours(tmp_path: Path, days: int) -> None:
     """A low peak among taller bars of the other series is labelled above them."""
@@ -321,7 +308,6 @@ def test_peak_labels_clear_taller_neighbours(tmp_path: Path, days: int) -> None:
                     assert label.box.y0 >= base + bar.value * scale + geo.dy
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 @pytest.mark.parametrize(("wide", "narrow"), [(50, 72), (72, 50)])
 def test_peak_labels_of_unequal_width_stack(
     tmp_path: Path, wide: int, narrow: int
@@ -343,7 +329,6 @@ def test_peak_labels_of_unequal_width_stack(
     assert not one.overlaps(two)
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 @pytest.mark.parametrize("days", [7, 90, 365, 730])
 def test_month_labels_do_not_collide(days: int) -> None:
     """Month labels thin out so neighbours stay at least a label apart."""
@@ -359,7 +344,6 @@ def test_month_labels_do_not_collide(days: int) -> None:
     assert all(b - a >= label_px for a, b in zip(centres, centres[1:], strict=False))
 
 
-@pytest.mark.xfail(strict=True, reason="renderer not implemented yet")
 def test_spec_rejects_days_that_are_not_consecutive() -> None:
     """A window with a missing day is an error, not a silently squashed chart."""
     from github_statistics.render import ChartSpec, Coverage, Series
