@@ -11,8 +11,6 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-pytestmark = pytest.mark.xfail(strict=True, reason="config commands not implemented")
-
 runner = CliRunner()
 
 SECRET = "ghp_do_not_print_this_value"

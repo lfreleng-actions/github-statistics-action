@@ -12,6 +12,8 @@ import typer
 
 from github_statistics import __version__
 
+from .config import config_app
+
 DERIVATIVE_WIDTH = 1920
 DEMO_MIN_DAYS = 7
 DEMO_MAX_DAYS = 730
@@ -21,6 +23,7 @@ app = typer.Typer(
     help="Daily, visual activity statistics for GitHub organisations and repositories.",
     no_args_is_help=True,
 )
+app.add_typer(config_app)
 
 
 def _version_callback(value: bool) -> None:
