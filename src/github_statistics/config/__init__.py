@@ -16,12 +16,13 @@ from .loader import (
     resolve_token,
 )
 from .models import Config, Identities, ResolvedIdentities, Target
-from .schema import ConfigError
+from .schema import ConfigError, NoConfigurationError
 
 __all__ = [
     "Config",
     "ConfigError",
     "Identities",
+    "NoConfigurationError",
     "Overrides",
     "Resolution",
     "ResolvedIdentities",

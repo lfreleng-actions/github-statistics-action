@@ -148,6 +148,10 @@ class ConfigError(Exception):
     """The configuration cannot be found, read, parsed or validated."""
 
 
+class NoConfigurationError(ConfigError):
+    """No configuration source exists: no flag, no ``$GHS_CONFIG``, no default file."""
+
+
 def _location(error: ValidationError) -> str:
     """Render the path to a failing value as ``targets[0].window``."""
     parts: list[str] = []

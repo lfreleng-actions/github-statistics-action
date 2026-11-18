@@ -40,7 +40,7 @@ from .models import (
     Target,
     Window,
 )
-from .schema import IDENTITY_KEYS, ConfigError, validate
+from .schema import IDENTITY_KEYS, ConfigError, NoConfigurationError, validate
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +336,7 @@ def _source(
         return _labelled(_read(path), str(path)), "default", str(path)
     if overrides.orgs or overrides.repos:
         return {"targets": []}, "flags", None
-    raise ConfigError(
+    raise NoConfigurationError(
         f"no configuration: pass --config or --config-data, set ${CONFIG_ENV}, "
         f"create {path}, or name --org or --repo"
     )
@@ -364,7 +364,8 @@ def resolve(
     base64 of JSON; the default path; and with none of those,
     ``--org``/``--repo`` overrides alone build targets from defaults.
     Overrides that combine ``include`` with ``exclude``, or ``repos``
-    with either, raise `ConfigError`.
+    with either, raise `ConfigError`; finding no source at all raises
+    its subclass `NoConfigurationError`.
     """
     overrides = overrides or Overrides()
     _check_overrides(overrides)
