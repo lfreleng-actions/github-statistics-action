@@ -1,0 +1,228 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Linux Foundation
+"""The SQLite store: one connection, every query (design §6.1)."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from datetime import date, timedelta
+
+from . import codec
+from .activity import ActivityStore
+from .base import assignments, chunks, marks
+from .models import DayRange, Member, SyncState
+from .schema import REPOSITORY_TABLES, TABLES
+
+_UPSERT_SYNC = (
+    f"INSERT INTO sync_state ({', '.join(codec.SYNC_COLUMNS)}) "
+    f"VALUES ({marks(len(codec.SYNC_COLUMNS))}) "
+    "ON CONFLICT (repo, metric) DO UPDATE SET " + assignments(codec.SYNC_COLUMNS[2:])
+)
+
+
+class Store(ActivityStore):
+    """One SQLite store, used as a context manager.
+
+    Every write method runs in one transaction, so an exception, or a
+    crash, part-way through a write leaves the previous state.
+    ``Store(Path(":memory:"))`` gives an in-memory store.
+    """
+
+    # Members
+
+    def replace_members(self, org: str, logins: Iterable[str], today: date) -> None:
+        """Make ``logins`` the public members of ``org`` as seen ``today``.
+
+        Logins already stored keep their ``first_seen``; logins no longer
+        listed are deleted.
+        """
+        current = set(logins)
+        seen = codec.day(today)
+        with self._transaction() as connection:
+            stored = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT login FROM members WHERE org = ?", (org,)
+                )
+            }
+            for chunk in chunks(sorted(stored - current)):
+                connection.execute(
+                    f"DELETE FROM members WHERE org = ? AND login IN ({marks(len(chunk))})",
+                    (org, *chunk),
+                )
+            connection.executemany(
+                "INSERT INTO members (org, login, first_seen, last_seen)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (org, login) DO UPDATE SET last_seen = excluded.last_seen",
+                ((org, login, seen, seen) for login in sorted(current)),
+            )
+
+    def members(self, org: str) -> list[Member]:
+        """The stored public members of ``org``, by login."""
+        rows = self._connection.execute(
+            "SELECT * FROM members WHERE org = ? ORDER BY login", (org,)
+        )
+        return [codec.member_from_row(row) for row in rows]
+
+    # Sync state
+
+    def sync_state(self, repo: str, metric: str) -> SyncState | None:
+        """The sync state of one metric of one repository, if any."""
+        row = self._connection.execute(
+            "SELECT * FROM sync_state WHERE repo = ? AND metric = ?", (repo, metric)
+        ).fetchone()
+        return None if row is None else codec.sync_from_row(row)
+
+    def set_sync_state(self, state: SyncState) -> None:
+        """Store ``state``, replacing any earlier state for its repository and metric."""
+        with self._transaction() as connection:
+            connection.execute(_UPSERT_SYNC, codec.sync_row(state))
+
+    # Coverage
+
+    def add_coverage(
+        self, repo: str, metric: str, from_day: date, to_day: date
+    ) -> None:
+        """Mark ``from_day`` to ``to_day`` complete, merging touching ranges."""
+        if to_day < from_day:
+            raise ValueError(
+                f"coverage range ends before it starts: {from_day}..{to_day}"
+            )
+        one = timedelta(days=1)
+        with self._transaction() as connection:
+            rows = list(
+                connection.execute(
+                    "SELECT from_day, to_day FROM coverage"
+                    " WHERE repo = ? AND metric = ? AND from_day <= ? AND to_day >= ?",
+                    (repo, metric, codec.day(to_day + one), codec.day(from_day - one)),
+                )
+            )
+            start = min([codec.day(from_day), *(row[0] for row in rows)])
+            end = max([codec.day(to_day), *(row[1] for row in rows)])
+            connection.executemany(
+                "DELETE FROM coverage WHERE repo = ? AND metric = ? AND from_day = ?",
+                ((repo, metric, row[0]) for row in rows),
+            )
+            connection.execute(
+                "INSERT INTO coverage (repo, metric, from_day, to_day)"
+                " VALUES (?, ?, ?, ?)",
+                (repo, metric, start, end),
+            )
+
+    def coverage(self, repo: str, metric: str) -> list[DayRange]:
+        """The complete day ranges of one metric of one repository, in order."""
+        rows = self._connection.execute(
+            "SELECT from_day, to_day FROM coverage WHERE repo = ? AND metric = ?"
+            " ORDER BY from_day",
+            (repo, metric),
+        )
+        return [DayRange(codec.parse_day(a), codec.parse_day(b)) for a, b in rows]
+
+    def covered(self, repo: str, metric: str, day: date) -> bool:
+        """Whether ``day`` lies in a complete range of the metric."""
+        text = codec.day(day)
+        row = self._connection.execute(
+            "SELECT 1 FROM coverage WHERE repo = ? AND metric = ?"
+            " AND from_day <= ? AND to_day >= ? LIMIT 1",
+            (repo, metric, text, text),
+        ).fetchone()
+        return row is not None
+
+    # Scope
+
+    def enter_scope(self, repo: str, from_day: date) -> None:
+        """Record ``repo`` in scope from ``from_day``; a no-op while already in scope.
+
+        Re-entering on or before the day a closed interval ended reopens
+        that interval rather than starting a new one.
+        """
+        text = codec.day(from_day)
+        with self._transaction() as connection:
+            if connection.execute(
+                "SELECT 1 FROM scope WHERE repo = ? AND to_day IS NULL", (repo,)
+            ).fetchone():
+                return
+            reopened = connection.execute(
+                "UPDATE scope SET to_day = NULL WHERE repo = ?"
+                " AND from_day <= ? AND to_day >= ?",
+                (repo, text, text),
+            )
+            if reopened.rowcount == 0:
+                connection.execute(
+                    "INSERT INTO scope (repo, from_day, to_day) VALUES (?, ?, NULL)",
+                    (repo, text),
+                )
+
+    def leave_scope(self, repo: str, day: date) -> None:
+        """Record ``repo`` out of scope from ``day`` on; ``day`` itself is out."""
+        text = codec.day(day)
+        with self._transaction() as connection:
+            connection.execute(
+                "DELETE FROM scope WHERE repo = ? AND to_day IS NULL AND from_day >= ?",
+                (repo, text),
+            )
+            connection.execute(
+                "UPDATE scope SET to_day = ? WHERE repo = ? AND to_day IS NULL",
+                (text, repo),
+            )
+
+    def in_scope(self, day: date) -> list[str]:
+        """The repositories in scope on ``day``, sorted."""
+        text = codec.day(day)
+        rows = self._connection.execute(
+            "SELECT DISTINCT repo FROM scope WHERE from_day <= ?"
+            " AND (to_day IS NULL OR to_day > ?) ORDER BY repo",
+            (text, text),
+        )
+        return [row[0] for row in rows]
+
+    # Privacy and housekeeping
+
+    def purge_repository(self, repo: str) -> None:
+        """Delete every row for ``repo`` from every table (design §5)."""
+        with self._transaction() as connection:
+            for table in REPOSITORY_TABLES:
+                connection.execute(f"DELETE FROM {table} WHERE repo = ?", (repo,))
+
+    def prune(self, before_day: date) -> dict[str, int]:
+        """Drop history that ended before ``before_day``; return rows deleted per table.
+
+        Items go once both created and closed before the day, so an item
+        still open stays; reviews and runs go by their own timestamps;
+        coverage ranges are clipped to start on the day; scope intervals
+        that ended by the day go.
+        """
+        low, _ = codec.day_bounds(before_day, before_day)
+        text = codec.day(before_day)
+        deleted: dict[str, int] = {}
+        with self._transaction() as connection:
+            deleted["items"] = connection.execute(
+                "DELETE FROM items WHERE created_at < ?"
+                " AND closed_at IS NOT NULL AND closed_at < ?",
+                (low, low),
+            ).rowcount
+            deleted["reviews"] = connection.execute(
+                "DELETE FROM reviews WHERE submitted_at < ?", (low,)
+            ).rowcount
+            deleted["runs"] = connection.execute(
+                "DELETE FROM runs WHERE created_at < ?", (low,)
+            ).rowcount
+            deleted["coverage"] = connection.execute(
+                "DELETE FROM coverage WHERE to_day < ?", (text,)
+            ).rowcount
+            connection.execute(
+                "UPDATE coverage SET from_day = ? WHERE from_day < ?", (text, text)
+            )
+            deleted["scope"] = connection.execute(
+                "DELETE FROM scope WHERE to_day IS NOT NULL AND to_day <= ?", (text,)
+            ).rowcount
+        return deleted
+
+    def counts(self) -> dict[str, int]:
+        """Row count of each table."""
+        return {
+            table: self._connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
+                0
+            ]
+            for table in TABLES
+        }

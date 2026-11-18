@@ -88,7 +88,6 @@ def _store() -> Any:
     return Store(MEMORY)
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 @pytest.mark.parametrize(
     ("owner", "expected"),
     [
@@ -111,7 +110,6 @@ def test_store_path_sanitises_components(
     assert path.resolve().is_relative_to(tmp_path.resolve())
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 @pytest.mark.parametrize("hostile", ["..", "...", "-", ""])
 def test_store_path_rejects_names_that_sanitise_to_nothing(
     tmp_path: Path, hostile: str
@@ -125,7 +123,6 @@ def test_store_path_rejects_names_that_sanitise_to_nothing(
         store_path(tmp_path, "api.github.com", hostile)
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_item_round_trip_and_enrichment() -> None:
     """Items survive a round trip and enrichment marks them read."""
     from github_statistics.store import Enrichment
@@ -166,7 +163,6 @@ def test_item_round_trip_and_enrichment() -> None:
         assert again.merged_by == "carol"
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_items_between_filters_by_day_and_repository() -> None:
     """Day ranges are inclusive and the repository filter chunks."""
     with _store() as store:
@@ -188,7 +184,6 @@ def test_items_between_filters_by_day_and_repository() -> None:
         ) == [1, 2]
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_replace_reviews_replaces_one_pull_requests_set() -> None:
     """A re-read replaces that pull request's reviews and no other's."""
     with _store() as store:
@@ -201,7 +196,6 @@ def test_replace_reviews_replaces_one_pull_requests_set() -> None:
         assert [r.id for r in store.reviews_between(_day(3), _day(3))] == [2, 3]
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_run_round_trip_and_job_counts() -> None:
     """Runs round trip; job counts attach and pending runs are listed."""
     pending = _run(2, status="in_progress", conclusion=None)
@@ -216,7 +210,6 @@ def test_run_round_trip_and_job_counts() -> None:
         assert [r.id for r in store.runs_needing_jobs(10)] == [2]
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 @pytest.mark.parametrize(
     ("change", "kept"),
     [
@@ -241,7 +234,36 @@ def test_upsert_runs_resets_jobs_on_a_state_change(
         assert run.jobs == (7 if kept else None)
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
+@pytest.mark.parametrize(
+    ("change", "kept"),
+    [({}, True), ({"attempt": 2}, False), ({"conclusion": "failure"}, False)],
+)
+def test_upsert_runs_uncovers_the_day_of_a_cleared_job_count(
+    change: dict[str, Any], kept: bool
+) -> None:
+    """A run whose job count is cleared takes its day out of jobs coverage."""
+    with _store() as store:
+        store.upsert_runs([_run(1), _run(2, repo="acme/b")])
+        store.set_job_counts({1: 7, 2: 7})
+        for repo in ("acme/a", "acme/b"):
+            store.add_coverage(repo, "jobs", _day(1), _day(3))
+        store.add_coverage("acme/a", "runs", _day(1), _day(3))
+
+        store.upsert_runs([_run(1, **change)])
+
+        expected = [(1, 3)] if kept else [(1, 1), (3, 3)]
+        assert [
+            (r.from_day.day, r.to_day.day) for r in store.coverage("acme/a", "jobs")
+        ] == expected
+        assert store.covered("acme/a", "jobs", _day(2)) is kept
+        assert store.coverage("acme/b", "jobs") == store.coverage("acme/a", "runs")
+        assert len(store.coverage("acme/b", "jobs")) == 1
+
+        store.upsert_runs([_run(3, created_at=_at(1))])
+
+        assert not store.covered("acme/a", "jobs", _day(1))
+
+
 def test_replace_members_keeps_first_seen() -> None:
     """Logins already present keep ``first_seen``; gone ones are deleted."""
     from github_statistics.store import Member
@@ -258,7 +280,6 @@ def test_replace_members_keeps_first_seen() -> None:
         assert store.members("other") == [Member("other", "zed", _day(1), _day(1))]
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_sync_state_round_trip() -> None:
     """Sync state reads back as written, and a second write replaces it."""
     from github_statistics.store import SyncState
@@ -281,7 +302,6 @@ def test_sync_state_round_trip() -> None:
         assert store.sync_state("acme/a", "runs") == second
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 @pytest.mark.parametrize(
     ("ranges", "expected"),
     [
@@ -313,14 +333,12 @@ def test_add_coverage_merges_ranges(
             assert store.covered("acme/a", "issues", _day(day)) is (day in days)
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_add_coverage_rejects_a_reversed_range() -> None:
     """A range that ends before it starts is an error."""
     with _store() as store, pytest.raises(ValueError):
         store.add_coverage("acme/a", "issues", _day(3), _day(1))
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_scope_intervals() -> None:
     """A repository is in scope from the day it enters until the day it leaves."""
     with _store() as store:
@@ -340,7 +358,6 @@ def test_scope_intervals() -> None:
         assert store.in_scope(_day(9)) == ["acme/a", "acme/b"]
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_write_rolls_back_on_an_exception() -> None:
     """An exception inside a write leaves the previous state."""
     with _store() as store:
@@ -353,7 +370,6 @@ def test_write_rolls_back_on_an_exception() -> None:
         assert store.counts()["items"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_schema_version_mismatch_drops_every_table(tmp_path: Path) -> None:
     """A store stamped with another version is dropped and recreated."""
     from github_statistics.store import SCHEMA_VERSION, Store
@@ -363,6 +379,7 @@ def test_schema_version_mismatch_drops_every_table(tmp_path: Path) -> None:
         store.upsert_items([_item()])
     connection = sqlite3.connect(path)
     connection.execute("CREATE TABLE stray(x)")
+    connection.execute("CREATE TABLE sqlitecache(x)")
     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
     connection.commit()
     connection.close()
@@ -375,9 +392,9 @@ def test_schema_version_mismatch_drops_every_table(tmp_path: Path) -> None:
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
     connection.close()
     assert "stray" not in tables
+    assert "sqlitecache" not in tables
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_store_keeps_rows_across_reopen(tmp_path: Path) -> None:
     """A matching schema version keeps the stored rows."""
     from github_statistics.store import Store
@@ -387,6 +404,63 @@ def test_store_keeps_rows_across_reopen(tmp_path: Path) -> None:
         store.upsert_items([_item()])
     with Store(path) as store:
         assert store.counts()["items"] == 1
+
+
+def test_failed_commit_rolls_back(tmp_path: Path) -> None:
+    """A write whose COMMIT fails leaves no transaction for later writes to join."""
+    from github_statistics.store import Store
+
+    path = tmp_path / "stats.sqlite"
+    with Store(path) as store:
+        store.connection.execute("PRAGMA busy_timeout = 0")
+        reader = sqlite3.connect(path, isolation_level=None)
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM items").fetchone()
+
+        with pytest.raises(sqlite3.OperationalError):
+            store.upsert_items([_item(number=1)])
+
+        assert not store.connection.in_transaction
+        reader.execute("ROLLBACK")
+        store.upsert_items([_item(number=2)])
+        numbers = [row[0] for row in reader.execute("SELECT number FROM items")]
+        reader.close()
+    assert numbers == [2]
+
+
+def test_schema_rebuild_rechecks_the_version_under_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store rebuilt by another process after the first check keeps its rows."""
+    from github_statistics.store import SCHEMA_VERSION, Store
+
+    path = tmp_path / "stats.sqlite"
+    with Store(path) as store:
+        store.upsert_items([_item()])
+    real = Store.schema_version
+    calls = iter([SCHEMA_VERSION + 1])
+
+    def racing(self: Any) -> int:
+        """Report a stale version once, as seen before another process rebuilt."""
+        return next(calls, None) or real(self)
+
+    monkeypatch.setattr(Store, "schema_version", racing)
+    with Store(path) as store:
+        assert store.counts()["items"] == 1
+
+
+def test_runs_needing_jobs_uses_its_partial_index() -> None:
+    """Batch selection of unenriched runs reads the partial index."""
+    with _store() as store:
+        plan = " ".join(
+            str(row[-1])
+            for row in store.connection.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM runs WHERE jobs IS NULL"
+                " ORDER BY created_at, id LIMIT 50"
+            )
+        )
+    assert "runs_needing_jobs" in plan
+    assert "TEMP B-TREE" not in plan
 
 
 def _fill(store: Any, repo: str, key: int) -> None:
@@ -401,7 +475,6 @@ def _fill(store: Any, repo: str, key: int) -> None:
     store.enter_scope(repo, _day(1))
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_purge_repository_leaves_nothing_behind() -> None:
     """Every row for the repository goes; other repositories stay."""
     from github_statistics.store import TABLES
@@ -432,7 +505,6 @@ def test_purge_repository_leaves_nothing_behind() -> None:
         assert store.counts()["members"] == before["members"]
 
 
-@pytest.mark.xfail(strict=True, reason="store not implemented")
 def test_prune_drops_rows_before_the_day() -> None:
     """Pruning removes finished history before the day and keeps the rest."""
     with _store() as store:
@@ -458,3 +530,19 @@ def test_prune_drops_rows_before_the_day() -> None:
             (_day(5), _day(6))
         ]
         assert store.coverage("acme/a", "runs") == []
+
+
+def test_nested_write_failure_rolls_back_only_that_write() -> None:
+    """A failed write inside an outer transaction leaves none of its rows."""
+    from github_statistics.store import Store
+
+    with Store(MEMORY) as store:
+        with store._transaction():
+            store.upsert_items([_item(number=1)])
+            with pytest.raises(sqlite3.IntegrityError):
+                store.upsert_items([_item(number=2), _item(number=3, kind="bogus")])
+            assert store.connection.in_transaction
+        numbers = [
+            row[0] for row in store.connection.execute("SELECT number FROM items")
+        ]
+    assert numbers == [1]
