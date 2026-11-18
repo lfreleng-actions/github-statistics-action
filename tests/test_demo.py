@@ -8,7 +8,6 @@ import re
 from datetime import date
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -18,7 +17,6 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 UNTIL = date(2026, 11, 16)
 
 
-@pytest.mark.xfail(strict=True, reason="demo not implemented yet")
 def test_demo_writes_six_pngs(tmp_path: Path) -> None:
     """Three charts, each as a master and a 1920 px derivative."""
     from github_statistics.cli import app
@@ -47,7 +45,6 @@ def test_demo_writes_six_pngs(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="demo not implemented yet")
 def test_demo_rejects_a_window_shorter_than_a_week(tmp_path: Path) -> None:
     """The demo window is bounded to 7..730 days."""
     from github_statistics.cli import app
@@ -59,7 +56,6 @@ def test_demo_rejects_a_window_shorter_than_a_week(tmp_path: Path) -> None:
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.xfail(strict=True, reason="demo not implemented yet")
 def test_demo_data_has_the_promised_gaps_and_is_seeded() -> None:
     """Four no-data days and one partial day; one seed always gives the same data."""
     from github_statistics.render import Coverage
