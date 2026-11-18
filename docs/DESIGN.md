@@ -281,7 +281,8 @@ src/github_statistics/
   client/         transport.py, paging.py, graphql.py (batched nodes()),
                   issues.py, runs.py, closers.py
   scope/          resolver.py: targets -> concrete repository list
-  store/          sqlite.py: schema, transactions, queries
+  store/          models.py (records), codec.py (rows), schema.py,
+                  base.py (transactions), sqlite.py (Store), paths.py
   collect/        sync per metric, budget.py, coverage.py
   series/         daily.py, identity.py, leaderboard.py, coverage.py
   render/         model.py (ChartSpec, Style), layout.py (plan_chart),
@@ -417,7 +418,18 @@ counts from that day without losing its history.
 ### 6.1 Store
 
 One SQLite file per `<api-host>/<owner>/stats.sqlite` under the cache
-directory, with GSR's transaction and schema-stamp discipline. Tables:
+directory, with GSR's transaction and schema-stamp discipline. Both path
+components keep `[A-Za-z0-9_.-]` alone, lower-cased, with leading dots and
+dashes stripped, so no owner name can leave the cache directory. Every
+write runs in one explicit transaction, so a failure part-way through a
+sync leaves the previous state. A write made inside an open transaction
+runs under a savepoint, so its failure undoes that write alone. The
+schema version lives in `PRAGMA user_version`; on a mismatch the store
+drops every table and recreates them in one transaction, with no
+migrations, since GitHub can supply every row again. The rebuild takes
+the write lock first and checks the version again under it, so a store
+another process has rebuilt keeps its rows. Timestamps are ISO-8601 UTC
+text and days `YYYY-MM-DD`. Tables:
 
 ```sql
 -- One row per issue or pull request ever seen in the window.
@@ -427,23 +439,56 @@ items(repo, number, node_id, kind,            -- 'issue' | 'pr'
       merged_by, merged_by_type,              -- NULL until enriched
       closed_by, closed_by_type,              -- NULL until enriched
       updated_at, reviews_read_at)            -- re-read when updated_at moves
+                                              -- PRIMARY KEY (repo, number)
 -- One row per submitted pull-request review.
-reviews(id, node_id, repo, number, reviewer, reviewer_type,
+reviews(id PRIMARY KEY, node_id, repo, number, reviewer, reviewer_type,
         state,                                -- APPROVED|CHANGES_REQUESTED|
         submitted_at)                         --   COMMENTED|DISMISSED
 -- One row per workflow run.
-runs(id, node_id, repo, workflow_path, event, created_at, conclusion,
-     actor, actor_type, attempt, jobs)        -- jobs NULL until enriched
+runs(id PRIMARY KEY, node_id, repo, workflow_path, event, status,
+     conclusion, created_at, actor, actor_type,
+     attempt, jobs)                           -- jobs NULL until enriched
 -- Public members of each member organisation, as last read.
-members(org, login, first_seen, last_seen)
+members(org, login, first_seen, last_seen)    -- PRIMARY KEY (org, login)
 -- Per repository, per metric: how far the sync got.
 sync_state(repo, metric, watermark, etag, oldest, last_sync_at,
            swept_to)                          -- runs: last full re-read
+                                              -- PRIMARY KEY (repo, metric)
 -- Per repository, per metric: which day ranges are complete.
-coverage(repo, metric, from_day, to_day)
+coverage(repo, metric, from_day, to_day)      -- closed ranges, merged
 -- Which repositories were in scope on which days.
-membership(repo, from_day, to_day)
+scope(repo, from_day, to_day)                 -- to_day NULL while in scope
 ```
+
+The name `scope` keeps it apart from organisation membership. A
+repository is in scope from `from_day` up to, not including, `to_day`.
+Coverage ranges include both ends, and adding one merges it with any range it overlaps
+or touches. Re-reading a pull request's reviews replaces its stored
+set, and a change in a stored run's `status`, `conclusion` or `attempt`
+resets `jobs` to `NULL` (§6.4). A run stored without a job count, new
+or reset, takes its creation day out of its repository's `jobs`
+coverage in the same transaction, splitting the range. Lookups by a
+list of repositories bind at most 500 parameters per statement.
+
+`purge_repository` deletes every row of one repository from every
+table in one transaction: the privacy purge for a repository that
+turns private (§5). `prune` drops history that ended before a given
+day. `github-statistics cache info` reports each store's path, size,
+schema version and row counts without changing the file;
+`cache clear [--owner OWNER]` deletes the stores, or one owner's, and
+nothing else under the cache directory; an owner that sanitises to
+nothing, an empty one included, is an error and deletes nothing. Both
+skip a store whose host directory, owner directory or file is a
+symbolic link, a cyclic one included, so neither reads nor deletes
+anything outside the cache directory, nor removes a link; `clear`
+leaves a linked `-wal`, `-shm` or `-journal` side file in place. Both
+take the cache directory from `--cache-dir`, else from the
+configuration's `cache.directory` (read through `--config`,
+`--config-data`, `$GHS_CONFIG` or the default file), else the XDG
+cache; a configuration that fails to load or fails the schema is an
+error, never a fallback to another directory, and so is an explicit
+empty `--cache-dir`, `--config` or `--config-data`: unlike the flags
+of §7.2, an empty one here never counts as not set.
 
 The store holds raw facts alone: logins and GitHub's own `type`,
 never a computed actor class. Classification
@@ -547,7 +592,8 @@ fifty runs per query at a cost of one point. Every job execution counts,
 re-run attempts included, and the count attaches to the run's creation
 day. `jobs` stays `NULL` until read, and the coverage table marks the
 jobs metric incomplete for that day until every run of the day has a
-count.
+count: storing a run without one removes its day from `jobs` coverage,
+and the collector adds the day back once it holds every count.
 
 The "CI" chart's two rows are **workflow runs** and **jobs**;
 jobs never fall below runs, so this pair never swaps. A fourth, optional
