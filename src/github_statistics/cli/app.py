@@ -12,6 +12,7 @@ import typer
 
 from github_statistics import __version__
 
+from .cache import cache_app
 from .config import config_app
 
 DERIVATIVE_WIDTH = 1920
@@ -24,6 +25,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(config_app)
+app.add_typer(cache_app)
 
 
 def _version_callback(value: bool) -> None:
