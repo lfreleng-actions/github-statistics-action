@@ -337,7 +337,7 @@ Shared options (config first, then CLI overrides, as in GSR):
 --strict               exit non-zero on any unreadable repository
 
 Identity options (each replaces the configured list for that key;
-comma- or space-separated, repeatable; §7.2):
+comma-, space- or newline-separated, repeatable; §7.2):
 --org-bots LOGINS      the organisation's own bots
 --external-bots LOGINS bots from outside the organisation
 --members LOGINS       humans to treat as members (publishes them, §7.1)
@@ -347,7 +347,10 @@ comma- or space-separated, repeatable; §7.2):
 ```
 
 Typer callbacks enforce the exclusivity rules (`--include` with
-`--exclude`; `--repo` with either) at parse time with a one-line error.
+`--exclude`; `--repo` with either) at parse time with a one-line error,
+and the loader's `resolve` rejects the same combinations for any caller.
+`--repo` names exact repositories: a name holding anything GitHub does
+not allow in one, a glob character included, fails.
 
 ## 5. Scope resolution
 
@@ -388,6 +391,10 @@ Resolution:
    `github-statistics run --repo "$GITHUB_REPOSITORY"` with no config.
 5. `include` and `exclude` may not both be non-empty, in config or on the
    CLI; the loader rejects it rather than guessing precedence.
+6. Each owner has at most one target, compared case-insensitively: an
+   owner gets one page, one cache and one set of settings, and `--org`
+   and `--repo` pick a configured target by owner. The loader rejects a
+   second target for an owner rather than let one replace the other.
 
 **Public repositories alone.** The tool never reads a private or
 internal repository, and no setting widens this. The resolver drops
@@ -715,13 +722,15 @@ shadows an organisation variable of the same name. An organisation can
 so set `GHS_ORG_BOTS` once at organisation level for every
 repository that runs the tool, and one repository can still override
 it. Lists in variables, inputs and flags accept commas, spaces or
-newlines. Composite actions cannot read `vars`, so the workflow passes
-each one explicitly, and every input defaults to empty so that a pinned
-older release is never handed a flag it does not know (GSR's rule).
+newlines, and a flag may repeat. An empty value counts as not set, so
+`--org-bots ""` leaves the configured list in force. Composite
+actions cannot read `vars`, so the workflow passes each one
+explicitly, and every input defaults to empty so that a pinned older
+release is never handed a flag it does not know (GSR's rule).
 
 Replacing rather than merging keeps the result predictable: what a
 level says is the whole list. `config show` prints the resolved lists
-and where each came from.
+and where each came from: `cli`, `target`, `config` or `default`.
 
 ### 7.3 Daily series
 
@@ -825,7 +834,8 @@ Composition:
 - Default palette: Okabe–Ito pairs, colour-blind safe and distinct when
   swapped: opened `#0072B2` / closed `#E69F00`; runs `#009E73` / jobs
   `#CC79A7`; succeeded `#009E73` / failed `#D55E00`. Overridable per
-  series in `render.palette`.
+  series in `render.palette`, whose keys are these six series names;
+  any other key fails validation.
 - Typography from matplotlib's bundled DejaVu Sans, so output is
   identical on every platform with no font download.
 
@@ -1243,7 +1253,11 @@ and nothing published lets a reader infer it.
     "derivatives": [1920],
     "svg": false,
     "palette": {},
-    "back_on_tie": { "pull_requests": "closed", "issues": "closed" }
+    "back_on_tie": {
+      "pull_requests": "closed",
+      "issues": "closed",
+      "workflows": "jobs"
+    }
   },
   "contributors": { "top_n": 100, "columns": [] },
   "budget": { "rest": 3000, "graphql_points": 1500, "reserve": 500 },
@@ -1256,10 +1270,15 @@ An empty `member_orgs` means the target owner itself; a target's own
 `identities` block, empty here, overrides the top-level lists key by key
 for that target alone (§7.2).
 
-Precedence, highest first: CLI flags; `--config-data`/`config` input;
-`--config PATH`; `$GHS_CONFIG` in the environment;
+The loader reads one source, highest first: `--config-data`/`config`
+input; `--config PATH`; `$GHS_CONFIG` in the environment;
 `$XDG_CONFIG_HOME/github-statistics/config.json`
-(`~/.config/github-statistics/config.json`); built-in defaults. Every
+(`~/.config/github-statistics/config.json`); and with none of those,
+`--org` or `--repo` alone build a configuration from built-in defaults,
+one target per owner. `--config-data`, `config` and `$GHS_CONFIG` hold
+the document itself, as JSON or base64 of JSON. CLI flags then override
+the source's values. Every object rejects keys it does not know, so a
+misspelt key, or a `scan_private`, fails validation. Every
 key has a default; the bot lists default to empty, so until someone
 fills them every bot lands in `external_bot` under the unclassified
 warning.
