@@ -89,11 +89,15 @@ class Contributors:
 
 @dataclass(frozen=True)
 class Budget:
-    """API spending limits for one run."""
+    """API spending limits for one run.
+
+    ``reserve`` stays ``None`` unless configured, so the transport can
+    choose its default: 500 for a token, 10 for anonymous reads.
+    """
 
     rest: int = 3000
     graphql_points: int = 1500
-    reserve: int = 500
+    reserve: int | None = None
 
 
 @dataclass(frozen=True)

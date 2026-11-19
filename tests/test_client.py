@@ -10,9 +10,6 @@ import httpx
 import pytest
 import respx
 
-# The client lands in the next commit; until then its names are unknown.
-# pyright: reportAttributeAccessIssue=false
-
 API = "https://api.github.com"
 TOKEN = "ghp_secret"
 
@@ -36,7 +33,6 @@ def _transport(sleep: Sleeper, **extra: Any) -> Any:
     return Transport(TOKEN, sleep=sleep, **extra)
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_headers_and_anonymous() -> None:
     from github_statistics.client import Transport
 
@@ -55,7 +51,6 @@ async def test_headers_and_anonymous() -> None:
     assert TOKEN not in repr(transport)
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 def test_graphql_url() -> None:
     from github_statistics.client import graphql_url
 
@@ -65,7 +60,6 @@ def test_graphql_url() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_transport_failure_backs_off_then_raises() -> None:
     from github_statistics.client import TransportError
 
@@ -80,7 +74,6 @@ async def test_transport_failure_backs_off_then_raises() -> None:
     assert transport.stats.retries["transport"] == 3
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_transport_failure_recovers() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -93,7 +86,6 @@ async def test_transport_failure_recovers() -> None:
     assert sleep.delays == [1.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_wait_budget_stops_retries() -> None:
     from github_statistics.client import TransportError
 
@@ -108,7 +100,6 @@ async def test_wait_budget_stops_retries() -> None:
     assert route.call_count == 7
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_401_fails_fast() -> None:
     from github_statistics.client import AuthError
 
@@ -123,7 +114,6 @@ async def test_401_fails_fast() -> None:
     assert TOKEN not in str(caught.value)
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_403_with_retry_after_is_a_rate_limit() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -140,7 +130,6 @@ async def test_403_with_retry_after_is_a_rate_limit() -> None:
     assert transport.stats.retries["rate_limit"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_403_with_remaining_zero_is_a_rate_limit() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -156,7 +145,6 @@ async def test_403_with_remaining_zero_is_a_rate_limit() -> None:
     assert sleep.delays == [1.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_403_without_rate_limit_headers_returns() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -170,7 +158,6 @@ async def test_403_without_rate_limit_headers_returns() -> None:
     assert sleep.delays == []
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_429_without_headers_backs_off_exponentially() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -187,7 +174,6 @@ async def test_429_without_headers_backs_off_exponentially() -> None:
     assert sleep.delays == [1.0, 2.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_malformed_retry_after_falls_back_to_backoff() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -202,7 +188,6 @@ async def test_malformed_retry_after_falls_back_to_backoff() -> None:
     assert sleep.delays == [1.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 def test_parse_retry_after() -> None:
     from github_statistics.client import parse_retry_after
 
@@ -214,7 +199,6 @@ def test_parse_retry_after() -> None:
     assert parse_retry_after("nan") is None
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_retry_after_beyond_wait_budget_returns_response() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -226,7 +210,6 @@ async def test_retry_after_beyond_wait_budget_returns_response() -> None:
     assert sleep.delays == []
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_5xx_retries_then_returns_last_response() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -240,7 +223,6 @@ async def test_5xx_retries_then_returns_last_response() -> None:
     assert transport.stats.requests == 3
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_foreign_host_refused() -> None:
     from github_statistics.client import ForeignHostError
 
@@ -257,7 +239,6 @@ async def test_foreign_host_refused() -> None:
         assert not respx.calls
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_get_paged_follows_next_across_three_pages() -> None:
     from github_statistics.client import get_paged
 
@@ -295,7 +276,6 @@ async def test_get_paged_follows_next_across_three_pages() -> None:
     assert first.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_get_paged_items_key_and_foreign_next() -> None:
     from github_statistics.client import ForeignHostError, get_paged
 
@@ -314,7 +294,6 @@ async def test_get_paged_items_key_and_foreign_next() -> None:
                 await anext(pages)
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_get_conditional_304_is_not_charged() -> None:
     from github_statistics.client import Budget, get_conditional
 
@@ -340,7 +319,6 @@ async def test_get_conditional_304_is_not_charged() -> None:
     assert budget.rest_spent == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_error_payload_raises_and_charges_cost() -> None:
     from github_statistics.client import Budget, GraphQLError, graphql
 
@@ -368,7 +346,6 @@ async def test_graphql_error_payload_raises_and_charges_cost() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_query_is_retried_after_a_502() -> None:
     from github_statistics.client import GraphQLError, graphql
 
@@ -391,7 +368,6 @@ async def test_graphql_query_is_retried_after_a_502() -> None:
     assert sleep.delays == [1.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_batched_halves_down_to_one_failing_id() -> None:
     from github_statistics.client import GraphQLError, batched
 
@@ -428,7 +404,6 @@ async def test_batched_halves_down_to_one_failing_id() -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_batched_propagates_other_errors() -> None:
     from github_statistics.client import GraphQLError, batched
 
@@ -439,7 +414,6 @@ async def test_batched_propagates_other_errors() -> None:
         await batched([1, 2], 2, fetch, str)
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 def test_budget_reserve_and_exhaustion() -> None:
     from github_statistics.client import Budget
 
@@ -461,7 +435,6 @@ def test_budget_reserve_and_exhaustion() -> None:
     assert budget.graphql_exhausted
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_budget_seeded_free_and_charged_per_request() -> None:
     from github_statistics.client import Budget
 
@@ -490,7 +463,6 @@ async def test_budget_seeded_free_and_charged_per_request() -> None:
     assert transport.stats.bytes_received > 0
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 def test_budget_observations_are_monotonic_per_window() -> None:
     from github_statistics.client import Budget
 
@@ -504,7 +476,6 @@ def test_budget_observations_are_monotonic_per_window() -> None:
     assert budget.rest_left == 400
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_budget_reserved_before_each_concurrent_attempt() -> None:
     import asyncio
 
@@ -531,7 +502,6 @@ async def test_budget_reserved_before_each_concurrent_attempt() -> None:
     assert failing.call_count == 2
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_budget_keeps_charge_for_sent_failures_only() -> None:
     from github_statistics.client import Budget, TransportError
 
@@ -549,7 +519,6 @@ async def test_budget_keeps_charge_for_sent_failures_only() -> None:
     assert budget.rest_spent == 2
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_redirect_followed_only_within_origin() -> None:
     from github_statistics.client import ForeignHostError
 
@@ -572,7 +541,6 @@ async def test_redirect_followed_only_within_origin() -> None:
     assert not evil.called
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
 async def test_redirect_statuses_followed_for_get(status: int) -> None:
     sleep = Sleeper()
@@ -585,7 +553,6 @@ async def test_redirect_statuses_followed_for_get(status: int) -> None:
     assert moved.called
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_seed_budget_raises_on_failure_other_than_404() -> None:
     from github_statistics.client import Budget, ClientError
 
@@ -608,7 +575,6 @@ async def test_seed_budget_raises_on_failure_other_than_404() -> None:
                 await transport.seed_budget()
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_304_observes_quota_and_is_free_only_when_authenticated() -> None:
     from github_statistics.client import Budget, Transport
 
@@ -632,7 +598,6 @@ async def test_304_observes_quota_and_is_free_only_when_authenticated() -> None:
     assert anonymous.rest_spent == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_request_wide_errors_are_not_split() -> None:
     from github_statistics.client import GraphQLError, batched, graphql
 
@@ -675,7 +640,6 @@ async def test_graphql_request_wide_errors_are_not_split() -> None:
     assert len(calls) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_anonymous_reads_get_their_own_default_reserve() -> None:
     from github_statistics.client import Budget, Transport
 
@@ -695,7 +659,6 @@ async def test_anonymous_reads_get_their_own_default_reserve() -> None:
             assert strict.rest_left == 0
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_points_held_before_concurrent_queries() -> None:
     import asyncio
 
@@ -719,7 +682,6 @@ async def test_graphql_points_held_before_concurrent_queries() -> None:
     assert budget.graphql_exhausted
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_batched_returns_results_and_remaining_ids_on_exhaustion() -> None:
     from github_statistics.client import BudgetExhaustedError, batched
 
@@ -734,7 +696,6 @@ async def test_batched_returns_results_and_remaining_ids_on_exhaustion() -> None
     assert out.failed == []
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_get_paged_resolves_a_relative_next_link() -> None:
     from github_statistics.client import get_paged
 
@@ -754,7 +715,6 @@ async def test_get_paged_resolves_a_relative_next_link() -> None:
     assert second.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_retry_limits_span_redirect_hops() -> None:
     sleep = Sleeper()
     with respx.mock:
@@ -773,7 +733,6 @@ async def test_retry_limits_span_redirect_hops() -> None:
     assert sleep.delays == [1.0, 2.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_exhausted_budget_stops_before_backing_off() -> None:
     from github_statistics.client import Budget, BudgetExhaustedError
 
@@ -799,7 +758,6 @@ async def test_exhausted_budget_stops_before_backing_off() -> None:
     assert sleep.delays == []
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_budgeted_graphql_needs_an_estimate() -> None:
     from github_statistics.client import Budget, graphql
 
@@ -812,7 +770,6 @@ async def test_budgeted_graphql_needs_an_estimate() -> None:
     assert not route.called
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_final_rate_limit_raises_when_the_budget_is_exhausted() -> None:
     from github_statistics.client import Budget, BudgetExhaustedError
 
@@ -845,7 +802,6 @@ async def test_final_rate_limit_raises_when_the_budget_is_exhausted() -> None:
     assert forbidden.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_points_taken_once_per_query() -> None:
     from github_statistics.client import Budget, BudgetExhaustedError, graphql
 
@@ -869,7 +825,6 @@ async def test_graphql_points_taken_once_per_query() -> None:
     assert route.call_count == 2
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 @pytest.mark.parametrize(
     "method", ["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 )
@@ -889,7 +844,6 @@ async def test_request_refuses_every_method_but_get(method: str) -> None:
     assert budget.rest_spent == 0
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
 async def test_graphql_redirect_is_an_error(status: int) -> None:
     from github_statistics.client import Budget, GraphQLError, graphql
@@ -909,7 +863,6 @@ async def test_graphql_redirect_is_an_error(status: int) -> None:
     assert budget.graphql_spent == 2
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_rate_limit_stops_the_budget() -> None:
     from github_statistics.client import Budget, BudgetExhaustedError, batched, graphql
 
@@ -945,7 +898,6 @@ async def test_graphql_rate_limit_stops_the_budget() -> None:
     assert sleep.delays == []
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_secondary_rate_limit_403_stops_the_budget() -> None:
     from github_statistics.client import (
         Budget,
@@ -993,7 +945,6 @@ async def test_graphql_secondary_rate_limit_403_stops_the_budget() -> None:
     assert limited.value.status == 403 and limited.value.request_wide
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_seed_budget_falls_back_to_a_core_header_only() -> None:
     from github_statistics.client import Budget, ClientError
 
@@ -1027,7 +978,6 @@ async def test_seed_budget_falls_back_to_a_core_header_only() -> None:
     assert core.remaining == 900
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 def test_graphql_rate_limit_outlasts_settlement() -> None:
     from github_statistics.client import Budget
 
@@ -1041,7 +991,6 @@ def test_graphql_rate_limit_outlasts_settlement() -> None:
     assert not budget.try_spend_graphql(1)
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_estimate_refunded_only_when_nothing_was_sent() -> None:
     import asyncio
 
@@ -1075,7 +1024,6 @@ async def test_graphql_estimate_refunded_only_when_nothing_was_sent() -> None:
     assert queued.graphql_left == 5
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 def test_transport_requires_positive_concurrency() -> None:
     from github_statistics.client import Transport
 
@@ -1083,7 +1031,6 @@ def test_transport_requires_positive_concurrency() -> None:
         Transport(TOKEN, concurrency=0)
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_401_stops_queued_and_later_requests() -> None:
     import asyncio
 
@@ -1103,7 +1050,6 @@ async def test_401_stops_queued_and_later_requests() -> None:
     assert route.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_stop_checked_before_a_queued_query_is_sent() -> None:
     import asyncio
 
@@ -1130,7 +1076,6 @@ async def test_graphql_stop_checked_before_a_queued_query_is_sent() -> None:
     assert route.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_401_raised_before_graphql_points_are_taken() -> None:
     from github_statistics.client import AuthError, Budget, graphql
 
@@ -1146,7 +1091,6 @@ async def test_401_raised_before_graphql_points_are_taken() -> None:
     assert route.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_budgeted_graphql_rate_limit_retries_before_stopping() -> None:
     from github_statistics.client import Budget, BudgetExhaustedError, graphql
 
@@ -1172,7 +1116,6 @@ async def test_budgeted_graphql_rate_limit_retries_before_stopping() -> None:
     assert route.call_count == 4
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_token_refused_over_plain_http() -> None:
     from github_statistics.client import Transport
 
@@ -1190,7 +1133,6 @@ async def test_token_refused_over_plain_http() -> None:
     assert route.calls[1].request.headers["Authorization"] == f"Bearer {TOKEN}"
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_batched_stops_after_too_many_timeouts() -> None:
     from github_statistics.client import GraphQLError, batched
 
@@ -1209,7 +1151,6 @@ async def test_batched_stops_after_too_many_timeouts() -> None:
     assert out.remaining == [5, 6, 7, 8]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_final_search_rate_limit_raises_budget_exhausted() -> None:
     from github_statistics.client import Budget, BudgetExhaustedError
 
@@ -1235,7 +1176,6 @@ async def test_final_search_rate_limit_raises_budget_exhausted() -> None:
     assert budget.remaining == 900
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_graphql_secondary_rate_limit_message_is_a_rate_limit() -> None:
     from github_statistics.client import Budget, GraphQLError, batched, graphql
 
@@ -1271,7 +1211,6 @@ async def test_graphql_secondary_rate_limit_message_is_a_rate_limit() -> None:
     assert route.call_count == 3
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_params_merge_into_the_url_query() -> None:
     from github_statistics.client import get_paged
 
@@ -1290,7 +1229,6 @@ async def test_params_merge_into_the_url_query() -> None:
     assert dict(other.calls[0].request.url.params) == {"a": "1", "b": "3"}
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_unbudgeted_graphql_rate_limit_statuses_are_request_wide() -> None:
     from github_statistics.client import GraphQLError, graphql
 
@@ -1315,7 +1253,6 @@ async def test_unbudgeted_graphql_rate_limit_statuses_are_request_wide() -> None
     assert route.call_count == 4
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 @pytest.mark.parametrize(
     "document",
     ["mutation { addStar { x } }", "subscription S { event { id } }"],
@@ -1334,7 +1271,6 @@ async def test_graphql_refuses_mutations_and_subscriptions(document: str) -> Non
     assert budget.graphql_spent == 0
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 @pytest.mark.parametrize(
     ("document", "expected"),
     [
@@ -1362,7 +1298,6 @@ def test_write_operation_reads_graphql_tokens(
     assert write_operation(document) == expected
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_batched_stops_once_timeouts_take_too_long() -> None:
     from github_statistics.client import GraphQLError, batched
 
@@ -1383,7 +1318,6 @@ async def test_batched_stops_once_timeouts_take_too_long() -> None:
     assert out.remaining == [3, 4, 5, 6]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_rate_limit_backoff_holds_queued_requests() -> None:
     import asyncio
 
@@ -1421,7 +1355,6 @@ async def test_rate_limit_backoff_holds_queued_requests() -> None:
     assert sorted(events[3:]) == ["send /a", "send /b"]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 @pytest.mark.parametrize(
     ("path", "graphql", "expected"),
     [
@@ -1438,7 +1371,6 @@ def test_cooldown_resource(path: str, graphql: bool, expected: str) -> None:
     assert Cooldown("/api/v3").resource(target, graphql) == expected
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_cooldown_wait_rechecks_the_hold_after_waking() -> None:
     import asyncio
 
@@ -1466,7 +1398,6 @@ TIMEOUT_MESSAGE = (
 )
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_batched_counts_timeout_diagnostics_in_error_payloads() -> None:
     from github_statistics.client import GraphQLError, batched, graphql
 
@@ -1490,7 +1421,6 @@ async def test_batched_counts_timeout_diagnostics_in_error_payloads() -> None:
     assert not failure.value.request_wide
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_terminal_rate_limit_stops_its_resource() -> None:
     from github_statistics.client import BudgetExhaustedError
 
@@ -1508,7 +1438,6 @@ async def test_terminal_rate_limit_stops_its_resource() -> None:
     assert other.status_code == 200 and search.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_queued_request_releases_its_slot_during_a_hold() -> None:
     import asyncio
 
@@ -1547,7 +1476,6 @@ async def test_queued_request_releases_its_slot_during_a_hold() -> None:
     assert events.index("wake") < events.index("send /b")
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_secondary_rate_limit_pauses_and_stops_every_resource() -> None:
     import asyncio
 
@@ -1594,7 +1522,6 @@ async def test_secondary_rate_limit_pauses_and_stops_every_resource() -> None:
     assert not query.called
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_rate_limit_pause_outlives_a_cancelled_request() -> None:
     import asyncio
 
@@ -1628,7 +1555,6 @@ async def test_rate_limit_pause_outlives_a_cancelled_request() -> None:
     assert sleep.delays == [5.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_secondary_rate_limit_403_body_waits_a_minute() -> None:
     sleep = Sleeper()
     secondary = {"message": "You have exceeded a secondary rate limit."}
@@ -1647,7 +1573,6 @@ async def test_secondary_rate_limit_403_body_waits_a_minute() -> None:
     assert transport.stats.retries["rate_limit"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_secondary_rate_limit_backoff_doubles_from_a_minute() -> None:
     sleep = Sleeper()
     secondary = {"message": "You have exceeded a secondary rate limit."}
@@ -1667,7 +1592,6 @@ async def test_secondary_rate_limit_backoff_doubles_from_a_minute() -> None:
     assert sleep.delays == [60.0, 120.0, 240.0]
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 @pytest.mark.parametrize("status", [403, 429])
 async def test_secondary_body_outranks_remaining_zero(status: int) -> None:
     from github_statistics.client import BudgetExhaustedError
@@ -1685,7 +1609,6 @@ async def test_secondary_body_outranks_remaining_zero(status: int) -> None:
     assert not search.called
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_unbudgeted_graphql_payload_rate_limit_stops_graphql() -> None:
     from github_statistics.client import BudgetExhaustedError, GraphQLError, graphql
 
@@ -1704,7 +1627,6 @@ async def test_unbudgeted_graphql_payload_rate_limit_stops_graphql() -> None:
     assert rest.call_count == 1
 
 
-@pytest.mark.xfail(strict=True, reason="client not implemented")
 async def test_budgeted_terminal_rate_limit_raises_budget_exhausted() -> None:
     from github_statistics.client import Budget, BudgetExhaustedError, get_paged
 

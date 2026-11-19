@@ -168,7 +168,6 @@ def test_loads_applies_defaults() -> None:
     assert config.identities.org_bots is None
 
 
-@pytest.mark.xfail(strict=True)
 def test_budget_reserve_unset_unless_configured() -> None:
     """An omitted reserve stays unset, so the transport picks its default."""
     from github_statistics.config import loads
