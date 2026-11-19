@@ -280,12 +280,13 @@ src/github_statistics/
                   loader.py (file, variable, XDG default)
   client/         transport.py, policy.py, accounting.py, cooldown.py,
                   paging.py, budget.py, errors.py, graphql.py (batched
-                  nodes()), issues.py, runs.py, closers.py
+                  nodes()), runs.py, closers.py
   scope/          resolver.py: targets -> concrete repository list;
                   apply.py: the resolved list -> the store's scope table
   store/          models.py (records), codec.py (rows), schema.py,
                   base.py (transactions), sqlite.py (Store), paths.py
-  collect/        sync per metric, coverage.py
+  collect/        items.py (issues and pull requests), sync per
+                  metric, coverage.py
   series/         daily.py, identity.py, leaderboard.py, coverage.py
   render/         model.py (ChartSpec, Style), layout.py (plan_chart),
                   bars3d.py (chart), palette.py, images.py
@@ -512,10 +513,14 @@ list of repositories bind at most 500 parameters per statement.
 `purge_repository` deletes every row of one repository from every
 table in one transaction: the privacy purge for a repository that
 turns private (§5). `prune` drops history that ended before a given
-day, except each repository's latest scope interval, so a repository
-that returns after a prune still enters from the run date (§5). A
+day. It keeps an item updated on or after that day, whose reviews
+enrichment may still re-read (§6.3), and each repository's latest
+scope interval, so a repository that returns after a prune still
+enters from the run date (§5). A
 repository that leaves on the day it entered keeps that interval,
-empty, for the same reason.
+empty, for the same reason. It raises each sync's `oldest` to the
+day, since the store no longer holds what that sync read before it
+(§6.2).
 `github-statistics cache info` reports each store's path, size,
 schema version and row counts without changing the file;
 `cache clear [--owner OWNER]` deletes the stores, or one owner's, and
@@ -547,18 +552,63 @@ memberships (§5, §7.1, §11).
 
 One listing serves both metrics and all four series:
 `GET /repos/{o}/{r}/issues?state=all&sort=updated&direction=asc
-&since=<watermark>&per_page=100`. Pull requests appear in it with a
+&since=<watermark>&per_page=100`, read by `sync_items(transport,
+store, owner, repo, *, window_start, now)`. It takes no `budget`
+argument: the budget is the transport's (§6.5), configured once by the
+caller, so a separate one could not disagree with what the transport
+charges. Pull requests appear in the listing with a
 `pull_request` key carrying `merged_at`. Per item: `created_at` feeds
 "opened", `closed_at` feeds "closed" (and `merged_at` tells a merge from
 a close without merging), and `user.login` and `user.type`
-feed the actor class. The watermark is the last
+feed the actor class; the store records a deleted account
+(`user: null`) as `ghost`. The first sync of a repository starts one
+second before the window start, 00:00 UTC, and records that start as
+`oldest`: any event inside the window moves an item's `updated_at`
+into it, so nothing older matters, and the second lists an item
+updated at midnight whichever way `since` reads. A sync, finished or
+stopped short, resumes from its watermark unless the window now
+starts before its `oldest`, which a wider window or a prune (raising
+`oldest` to its day) can leave. It never listed those days, or no
+longer holds them, so it starts over from the new window; coverage an
+earlier sync left is not taken as proof for this one. Such a restart
+clears `reviews_read_at` on the pull requests created before the old
+`oldest`, since a prune may have dropped their older reviews while
+keeping them, so enrichment reads those reviews again (§6.3). A sync also
+starts over when the window now starts after its watermark, rather
+than reread items the window no longer needs or restore pruned ones.
+The watermark, kept in `sync_state` under the metric `items`, is the last
 `updated_at` seen; because ordering
 is by `updated_at` ascending, the sync can
-resume after any interruption. `since` returns items updated after
-the timestamp given, so a resume starts one second before the
-watermark and upserts what it re-reads, which loses no item that
-shares the boundary timestamp; a listing that
-GitHub truncates re-anchors at the last page rather than failing.
+resume after any interruption. The same transaction stores each page
+and the watermark it advances to. A later sync starts one
+second before the watermark and upserts what it re-reads, which loses
+no item that shares the boundary timestamp, whether `since` returns
+items updated at the timestamp given or after it alone. The upsert
+keeps the enrichment columns (§6.3). The sync follows `next` links
+alone and counts the listing read to its end when they stop, so it
+does not detect or recover a listing GitHub truncates.
+
+Coverage is all-or-nothing per sync: an item read late in the listing
+can carry an event from any earlier day, so a partly read listing
+proves no day complete. A listing read to its end, and nothing less,
+adds coverage of both `issues` and `pull_requests`, from the window
+start to the day before the run, since the chain of listings it ends
+began at or before the window start; a repository whose first
+sync stopped short has none, and its days chart as gaps until it
+completes. A spent budget stops a sync this way, and so does a rate
+limit an unbudgeted transport returns after its retries. That limit
+stops its resource for the rest of the run (§6.5), so the other
+repositories' later requests for it are not sent and their syncs stop
+short too, while requests already in flight finish. Any other `403`, a
+`404` or `410` (issues disabled, repository gone), or a `5xx` the
+transport's retries did not clear, leaves the
+repository unread for the run with its coverage unchanged, and the
+other repositories carry on. An `AuthError` stops them all and
+reaches the caller as itself. Repositories with a watermark sync
+before those without, so the quick incremental work goes first. Each
+keeps the spelling of its name the `scope` table holds, as names
+compare without case, so a rename in case alone keeps its watermark,
+items and coverage under one key.
 
 An item created before the window but closed inside it arrives because
 closing updates `updated_at`. An item closed and then reopened arrives
