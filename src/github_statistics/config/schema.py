@@ -133,7 +133,7 @@ SCHEMA: dict[str, Any] = {
             {
                 "rest": {"type": "integer", "minimum": 1},
                 "graphql_points": {"type": "integer", "minimum": 0},
-                "reserve": {"type": "integer", "minimum": 0},
+                "reserve": {"type": ["integer", "null"], "minimum": 0},
             }
         ),
         "output": _object({"directory": {"type": "string", "minLength": 1}}),

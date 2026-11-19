@@ -278,12 +278,13 @@ src/github_statistics/
                   config, cache
   config/         schema.py (jsonschema), models.py (frozen dataclasses),
                   loader.py (file, variable, XDG default)
-  client/         transport.py, paging.py, graphql.py (batched nodes()),
-                  issues.py, runs.py, closers.py
+  client/         transport.py, policy.py, accounting.py, cooldown.py,
+                  paging.py, budget.py, errors.py, graphql.py (batched
+                  nodes()), issues.py, runs.py, closers.py
   scope/          resolver.py: targets -> concrete repository list
   store/          models.py (records), codec.py (rows), schema.py,
                   base.py (transactions), sqlite.py (Store), paths.py
-  collect/        sync per metric, budget.py, coverage.py
+  collect/        sync per metric, coverage.py
   series/         daily.py, identity.py, leaderboard.py, coverage.py
   render/         model.py (ChartSpec, Style), layout.py (plan_chart),
                   bars3d.py (chart), palette.py, images.py
@@ -291,6 +292,15 @@ src/github_statistics/
   site/           templates/ (Jinja2), assets/ (CSS), build.py
   export/         json.py, csv.py
 ```
+
+The client reads and never writes, by construction (§9.4):
+`client/transport.py` sends a REST `GET`, and a GraphQL query as a
+`POST` to the GraphQL endpoint, and nothing else. It refuses any other
+method, and a GraphQL document that defines a mutation or a
+subscription, before sending. Resending any request is safe, so one
+retry rule covers transport failures, rate limits and `5xx` alike, and
+a `GET` alone follows a redirect. The token goes to the API host alone,
+and over HTTPS alone unless the caller opts out.
 
 Distribution name `github-statistics` (free on PyPI as of the date
 above; someone already holds `github-stats`), import package
@@ -608,7 +618,8 @@ Each run proceeds in priority order under a request budget:
    public member list of every member organisation (every page, §7.1).
 2. **Incremental sync** of every repository for items and runs, from the
    watermarks. On a quiet repository this is one conditional request
-   per metric, answered `304` at no rate-limit cost.
+   per metric, answered `304` at no rate-limit cost (GitHub waives the
+   charge for an authenticated request alone).
 3. **Enrichment** of new and updated pull requests (reviews, mergers,
    closers) and new runs (job counts) by GraphQL batches; cheap, and
    bounded by the day's activity.
@@ -616,13 +627,65 @@ Each run proceeds in priority order under a request budget:
    repository whose `oldest` has not reached the window start, newest
    slice first, until the budget runs out or coverage completes.
 
-The budget is a count of REST requests (default 3,000, configurable),
-checked against `x-ratelimit-remaining` at start so a run never drains
-the token below a reserve shared with other consumers. GraphQL spends
-points from a separate pool and has its own, smaller budget. A run that
+The budget is a courtesy limit, not exact accounting: GitHub enforces
+the real rate limit and the transport backs off on it, while the budget
+lets a run stop cleanly and leave headroom for other consumers. Each
+transport, one token reading one target, has a budget of its own, so
+`budget.rest` (default 3,000) and `budget.graphql_points` (default
+1,500) apply per target per run. The budget compares the REST count
+with `x-ratelimit-remaining`, seeded from the free `GET /rate_limit` at
+start and taken from every core response after, so a run stops before
+the token drops below `budget.reserve` (default 500; anonymous reads,
+at 60 requests an hour, keep 10 unless the configuration sets one).
+Within one rate-limit window the lowest count seen wins, and a later
+window replaces it. The transport takes a request from the budget
+before every attempt, retries and redirects included, refunds an
+authenticated `304` or a request that never left, and stops before
+backing off once none remains, and at every final rate-limit response,
+and the collector stops cleanly with its partial coverage. A rate limit
+is a `429`, or a `403` with `Retry-After`, with
+`x-ratelimit-remaining: 0`, or with a body naming a secondary rate
+limit; a `403` or `429` naming one that gives no retry time waits a
+minute, doubling on each retry after. While
+a request backs off from a rate limit, every other request for the same
+resource (core, search or GraphQL), queued or retrying, waits until
+that backoff ends rather than sending into the limit, and waits without
+a connection slot, so it never blocks another resource. A limit whose
+body names a secondary limit, or that does not report
+`x-ratelimit-remaining: 0`, may be secondary, which
+GitHub applies across REST and GraphQL, so its backoff holds every
+resource. The backoff belongs to the limit, not the request, and runs
+to its end even if a caller cancels that request. A rate limit that
+outlasts a request's retries stops its resource, or every resource for
+a secondary one, for the rest of the run: later requests for it are
+not sent.
+GraphQL spends points from a separate pool: a budgeted query gives a
+bound on its cost, which the budget takes once before sending, gives
+back when no attempt left, and settles against the cost GitHub reports,
+and a halving batch that runs out, or whose timed-out chunks (a `502`
+or `504`, or an error payload GitHub says may be a timeout) number ten
+or take five minutes between them, returns what it fetched with the ids
+it did not reach. A GraphQL `429`, or a `403` with a rate-limit header,
+retries like any other request; one
+that outlasts the retries stops the GraphQL pool, as does at once an
+HTTP `200` payload reporting a rate limit, budgeted or not: a
+`RATE_LIMITED` error stops GraphQL requests, and an error message
+naming a secondary limit stops every request. The pool stays
+stopped for the rest of the run, whatever queries settle after it, and
+queued queries are not sent once it has. A
+`401` likewise stops the transport, so no queued request sends a
+rejected token, and a later query reports the `401` rather than an
+empty budget. The observed count moves when a
+response reports it and not before, so a run may overshoot its REST
+count, or dip into the reserve, by at most the requests in flight
+(the transport's concurrency), and overshoot its GraphQL points by at
+most the queries in flight. A response that carries no core count leaves
+the observed one unchanged, so while GitHub sends none, `budget.rest`
+alone bounds the run; exactness beyond that is a non-goal. A run that
 exhausts its budget exits zero with a notice; coverage says what
-remains. Steps 2 and 3 are never starved by step 4, so the most recent
-days are always current even while history is still filling in.
+remains. Steps 2 and 3 are never starved by step 4,
+so the most recent days are always current even while history is still
+filling in.
 
 Everything is idempotent: writes are `INSERT OR REPLACE` keyed by GitHub
 ids, watermarks advance inside the same transaction that stores the page
