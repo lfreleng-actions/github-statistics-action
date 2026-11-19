@@ -274,14 +274,15 @@ configuration change (a new bot name, a new palette) costs no requests.
 
 ```text
 src/github_statistics/
-  cli/            Typer app: collect, render, site, run, export, doctor,
-                  config, cache
+  cli/            Typer app: scope, collect, render, site, run, export,
+                  doctor, config, cache
   config/         schema.py (jsonschema), models.py (frozen dataclasses),
                   loader.py (file, variable, XDG default)
   client/         transport.py, policy.py, accounting.py, cooldown.py,
                   paging.py, budget.py, errors.py, graphql.py (batched
                   nodes()), issues.py, runs.py, closers.py
-  scope/          resolver.py: targets -> concrete repository list
+  scope/          resolver.py: targets -> concrete repository list;
+                  apply.py: the resolved list -> the store's scope table
   store/          models.py (records), codec.py (rows), schema.py,
                   base.py (transactions), sqlite.py (Store), paths.py
   collect/        sync per metric, coverage.py
@@ -389,14 +390,18 @@ Resolution:
 
 1. `GET /users/{owner}` decides whether the owner is an organisation or
    a user; the listing endpoint follows (`/orgs/{o}/repos?type=public`
-   or `/users/{u}/repos`, `per_page=100`, paginated).
-2. If `include` is non-empty and every entry is an exact name (no glob
-   characters), the
+   or `/users/{u}/repos?type=owner`, `per_page=100`, paginated).
+2. If `include` is non-empty and every entry is an exact name (no `*`,
+   `?` or `[`), the
    resolver skips the listing and reads each with `GET /repos/{o}/{r}`. This
    is the repository-scope path: it works with a token that cannot list
-   the organisation, including a repository's own `GITHUB_TOKEN`.
+   the organisation, including a repository's own `GITHUB_TOKEN`. A
+   name answering `404` drops with a warning; a named repository skips
+   the `scan_*` toggles, since naming one chooses it. An empty
+   `include` takes the listing path.
 3. Otherwise the resolver filters the listing by the three `scan_*` toggles, then
-   by `include` globs (when non-empty), then by `exclude` globs.
+   by `include` globs (when non-empty), then by `exclude` globs. Globs
+   match the repository name case-insensitively.
 4. `--repo owner/name` on the CLI builds an ad-hoc target per owner with
    that exact include list, so a pull request job can run
    `github-statistics run --repo "$GITHUB_REPOSITORY"` with no config.
@@ -414,14 +419,38 @@ listing returned it or `include` or `--repo` named it, and names each
 one it dropped in a warning. Each run checks visibility afresh: a
 repository that has turned private leaves the scope at once, and the
 run deletes its rows from the store, and so from every later chart,
-table and export.
+table and export. A public listing no longer returns such a
+repository, so the resolver reads each stored repository the listing
+lacks on its own, including one whose sole trace is the rows a
+prune kept; one that answers `404` counts as private, since a
+token without access to a private repository gets a `404` for it. A
+read that GitHub redirects to a repository of another name or owner (a
+rename or a transfer) counts as `not found` too. Store keys compare
+without case, so a purge deletes every spelling of the name in any
+of the store's per-repository tables. A repository whose read fails
+for any other reason keeps its stored state until a later run can tell.
+
+Each repository the resolver drops carries its reason: `not public`,
+`archived`, `fork`, `template`, `excluded`, `not included` or
+`not found`. `github-statistics scope` resolves one owner and prints
+the names it keeps on standard output, one per line, or with
+`--format csv|json` as one comma-separated line or a JSON array; the
+dropped list and every warning go to standard error. An empty scope
+prints nothing and exits 0, so the daily workflow (§9.2) can test for
+empty output before minting a token. When a repository's read
+fails, the scope is incomplete: the command prints no names and exits
+1, so the workflow cannot take a partial list for the whole. Its
+requests come out of the configured REST budget and reserve like any
+other command's. The command never touches the store.
 
 The store records the days each resolved repository was in scope. A
 repository first seen enters from the window start, or its creation
 date if later, so its backfilled history counts; a later change carries
 the date of the run that saw it, so a
 repository that leaves the scope (archived, excluded) drops out of the
-counts from that day without losing its history.
+counts from that day without losing its history, and one that returns
+enters again from that day. The run purges a repository dropped as
+`not public` or `not found` instead.
 
 ## 6. Data model and collection
 
@@ -483,7 +512,11 @@ list of repositories bind at most 500 parameters per statement.
 `purge_repository` deletes every row of one repository from every
 table in one transaction: the privacy purge for a repository that
 turns private (§5). `prune` drops history that ended before a given
-day. `github-statistics cache info` reports each store's path, size,
+day, except each repository's latest scope interval, so a repository
+that returns after a prune still enters from the run date (§5). A
+repository that leaves on the day it entered keeps that interval,
+empty, for the same reason.
+`github-statistics cache info` reports each store's path, size,
 schema version and row counts without changing the file;
 `cache clear [--owner OWNER]` deletes the stores, or one owner's, and
 nothing else under the cache directory; an owner that sanitises to

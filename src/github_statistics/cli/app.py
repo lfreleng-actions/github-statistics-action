@@ -14,6 +14,7 @@ from github_statistics import __version__
 
 from .cache import cache_app
 from .config import config_app
+from .scope import scope
 
 DERIVATIVE_WIDTH = 1920
 DEMO_MIN_DAYS = 7
@@ -26,6 +27,7 @@ app = typer.Typer(
 )
 app.add_typer(config_app)
 app.add_typer(cache_app)
+app.command()(scope)
 
 
 def _version_callback(value: bool) -> None:
