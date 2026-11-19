@@ -154,11 +154,15 @@ class Store(ActivityStore):
                 )
 
     def leave_scope(self, repo: str, day: date) -> None:
-        """Record ``repo`` out of scope from ``day`` on; ``day`` itself is out."""
+        """Record ``repo`` out of scope from ``day`` on; ``day`` itself is out.
+
+        An interval that opened on ``day`` closes empty rather than going,
+        so the store still records that ``repo`` was seen.
+        """
         text = codec.day(day)
         with self._transaction() as connection:
             connection.execute(
-                "DELETE FROM scope WHERE repo = ? AND to_day IS NULL AND from_day >= ?",
+                "DELETE FROM scope WHERE repo = ? AND to_day IS NULL AND from_day > ?",
                 (repo, text),
             )
             connection.execute(
@@ -176,6 +180,12 @@ class Store(ActivityStore):
         )
         return [row[0] for row in rows]
 
+    def stored_repositories(self) -> list[str]:
+        """Every repository with a row in any per-repository table, sorted."""
+        union = " UNION ".join(f"SELECT repo FROM {t}" for t in REPOSITORY_TABLES)
+        rows = self._connection.execute(f"{union} ORDER BY repo")
+        return [row[0] for row in rows]
+
     # Privacy and housekeeping
 
     def purge_repository(self, repo: str) -> None:
@@ -190,7 +200,8 @@ class Store(ActivityStore):
         Items go once both created and closed before the day, so an item
         still open stays; reviews and runs go by their own timestamps;
         coverage ranges are clipped to start on the day; scope intervals
-        that ended by the day go.
+        that ended by the day go, except each repository's latest, which
+        stays so a repository that returns is known to have been seen.
         """
         low, _ = codec.day_bounds(before_day, before_day)
         text = codec.day(before_day)
@@ -214,7 +225,10 @@ class Store(ActivityStore):
                 "UPDATE coverage SET from_day = ? WHERE from_day < ?", (text, text)
             )
             deleted["scope"] = connection.execute(
-                "DELETE FROM scope WHERE to_day IS NOT NULL AND to_day <= ?", (text,)
+                "DELETE FROM scope WHERE to_day IS NOT NULL AND to_day <= ?"
+                " AND from_day < (SELECT MAX(from_day) FROM scope AS latest"
+                " WHERE latest.repo = scope.repo)",
+                (text,),
             ).rowcount
         return deleted
 

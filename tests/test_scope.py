@@ -14,7 +14,6 @@ import respx
 from typer.testing import CliRunner
 
 API = "https://api.github.com"
-pytestmark = pytest.mark.xfail(strict=True, reason="scope resolution not built yet")
 
 
 def _repo(name: str, **extra: Any) -> dict[str, Any]:
