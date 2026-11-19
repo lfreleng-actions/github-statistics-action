@@ -13,8 +13,6 @@ import httpx
 import pytest
 import respx
 
-pytestmark = pytest.mark.xfail(strict=True, reason="item collector not built yet")
-
 API = "https://api.github.com"
 LISTING = f"{API}/repos/acme/a/issues"
 WINDOW = date(2026, 3, 1)
@@ -316,7 +314,6 @@ async def test_finished_sync_checks_its_watermark_and_oldest_not_coverage() -> N
         )
 
 
-@pytest.mark.xfail(strict=True, reason="reread_reviews does not exist yet")
 @respx.mock
 async def test_a_wider_window_rereads_reviews_a_prune_dropped() -> None:
     from github_statistics.client import Transport

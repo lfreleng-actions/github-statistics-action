@@ -302,7 +302,6 @@ def test_sync_state_round_trip() -> None:
         assert store.sync_state("acme/a", "runs") == second
 
 
-@pytest.mark.xfail(strict=True, reason="store_item_page not built yet")
 def test_store_item_page_writes_items_and_watermark_together() -> None:
     """A page and its watermark commit together, or neither does."""
     from github_statistics.store import SyncState
@@ -551,7 +550,6 @@ def test_prune_drops_rows_before_the_day() -> None:
         assert store.coverage("acme/a", "runs") == []
 
 
-@pytest.mark.xfail(strict=True, reason="prune keeps recent updates not built yet")
 def test_prune_keeps_items_updated_on_or_after_the_day() -> None:
     """An item finished before the day but updated since stays for enrichment."""
     with _store() as store:
