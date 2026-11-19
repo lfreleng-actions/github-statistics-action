@@ -168,6 +168,15 @@ def test_loads_applies_defaults() -> None:
     assert config.identities.org_bots is None
 
 
+@pytest.mark.xfail(strict=True)
+def test_budget_reserve_unset_unless_configured() -> None:
+    """An omitted reserve stays unset, so the transport picks its default."""
+    from github_statistics.config import loads
+
+    assert loads(_raw()).budget.reserve is None
+    assert loads(_raw(budget={"reserve": 500})).budget.reserve == 500
+
+
 def test_loads_reads_base64_as_json() -> None:
     """Base64 of a document loads to the same configuration as the document."""
     from github_statistics.config import loads
