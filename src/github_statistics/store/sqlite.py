@@ -5,12 +5,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from . import codec
 from .activity import ActivityStore
 from .base import assignments, chunks, marks
-from .models import DayRange, Member, SyncState
+from .models import DayRange, Item, Member, SyncState
 from .schema import REPOSITORY_TABLES, TABLES
 
 _UPSERT_SYNC = (
@@ -77,6 +77,30 @@ class Store(ActivityStore):
         """Store ``state``, replacing any earlier state for its repository and metric."""
         with self._transaction() as connection:
             connection.execute(_UPSERT_SYNC, codec.sync_row(state))
+
+    def store_item_page(self, items: Iterable[Item], state: SyncState) -> None:
+        """Upsert one listing page of ``items`` and ``state`` in one transaction.
+
+        The watermark in ``state`` then never runs ahead of the items it
+        describes, nor falls behind them (design §6.5).
+        """
+        with self._transaction():
+            self.upsert_items(items)
+            self.set_sync_state(state)
+
+    def reread_reviews(self, repo: str, created_before: datetime) -> None:
+        """Mark the pull requests of ``repo`` created before a time for enrichment.
+
+        A prune drops reviews submitted before its day but keeps a pull
+        request updated since, with its ``reviews_read_at``; clearing
+        that lets a wider window read the dropped reviews again.
+        """
+        with self._transaction() as connection:
+            connection.execute(
+                "UPDATE items SET reviews_read_at = NULL"
+                " WHERE repo = ? AND kind = 'pr' AND created_at < ?",
+                (repo, codec.timestamp(created_before)),
+            )
 
     # Coverage
 
@@ -197,11 +221,14 @@ class Store(ActivityStore):
     def prune(self, before_day: date) -> dict[str, int]:
         """Drop history that ended before ``before_day``; return rows deleted per table.
 
-        Items go once both created and closed before the day, so an item
-        still open stays; reviews and runs go by their own timestamps;
+        Items go once created, closed and last updated before the day, so
+        an item still open stays, and so does one updated since, which
+        enrichment may still re-read; reviews and runs go by their own timestamps;
         coverage ranges are clipped to start on the day; scope intervals
         that ended by the day go, except each repository's latest, which
         stays so a repository that returns is known to have been seen.
+        Each sync has its ``oldest`` raised to the day, since the store no
+        longer holds what it read before it.
         """
         low, _ = codec.day_bounds(before_day, before_day)
         text = codec.day(before_day)
@@ -209,8 +236,8 @@ class Store(ActivityStore):
         with self._transaction() as connection:
             deleted["items"] = connection.execute(
                 "DELETE FROM items WHERE created_at < ?"
-                " AND closed_at IS NOT NULL AND closed_at < ?",
-                (low, low),
+                " AND closed_at IS NOT NULL AND closed_at < ? AND updated_at < ?",
+                (low, low, low),
             ).rowcount
             deleted["reviews"] = connection.execute(
                 "DELETE FROM reviews WHERE submitted_at < ?", (low,)
@@ -223,6 +250,10 @@ class Store(ActivityStore):
             ).rowcount
             connection.execute(
                 "UPDATE coverage SET from_day = ? WHERE from_day < ?", (text, text)
+            )
+            connection.execute(
+                "UPDATE sync_state SET oldest = ? WHERE oldest < ?",
+                (low, low),
             )
             deleted["scope"] = connection.execute(
                 "DELETE FROM scope WHERE to_day IS NOT NULL AND to_day <= ?"
