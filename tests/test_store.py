@@ -302,6 +302,44 @@ def test_sync_state_round_trip() -> None:
         assert store.sync_state("acme/a", "runs") == second
 
 
+def test_store_item_page_writes_items_and_watermark_together() -> None:
+    """A page and its watermark commit together, or neither does."""
+    from github_statistics.store import SyncState
+
+    with _store() as store:
+        state = SyncState("acme/a", "items", watermark=_at(2))
+        store.store_item_page([_item(number=1)], state)
+        assert store.counts()["items"] == 1
+        assert store.sync_state("acme/a", "items") == state
+
+        naive = SyncState("acme/a", "items", watermark=datetime(2026, 3, 3))
+        with pytest.raises(ValueError):
+            store.store_item_page([_item(number=2)], naive)
+
+        assert store.counts()["items"] == 1
+        assert store.sync_state("acme/a", "items") == state
+
+
+def test_store_item_page_clears_a_read_marker_in_the_listed_second() -> None:
+    """A listed update in the second of the last read leaves the item to re-read."""
+    from github_statistics.store import SyncState
+
+    with _store() as store:
+        store.upsert_items(
+            [
+                _item(number=1, updated_at=_at(1), reviews_read_at=_at(2)),
+                _item(number=2, updated_at=_at(1), reviews_read_at=_at(2)),
+            ]
+        )
+        store.store_item_page(
+            [_item(number=1, updated_at=_at(2)), _item(number=2, updated_at=_at(1))],
+            SyncState("acme/a", "items", watermark=_at(2)),
+        )
+
+        needing = store.items_needing_enrichment("acme/a", 10)
+        assert [(i.number, i.reviews_read_at) for i in needing] == [(1, None)]
+
+
 @pytest.mark.parametrize(
     ("ranges", "expected"),
     [
@@ -530,6 +568,26 @@ def test_prune_drops_rows_before_the_day() -> None:
             (_day(5), _day(6))
         ]
         assert store.coverage("acme/a", "runs") == []
+
+
+def test_prune_keeps_items_updated_on_or_after_the_day() -> None:
+    """An item finished before the day but updated since stays for enrichment."""
+    with _store() as store:
+        store.upsert_items(
+            [
+                _item(number=1, created_at=_at(1), closed_at=_at(2), updated_at=_at(6)),
+                _item(number=2, created_at=_at(1), closed_at=_at(2), updated_at=_at(5)),
+                _item(number=3, created_at=_at(1), closed_at=_at(2), updated_at=_at(3)),
+            ]
+        )
+
+        deleted = store.prune(_day(5))
+
+        assert deleted["items"] == 1
+        assert sorted(i.number for i in store.items_between(_day(1), _day(9))) == [
+            1,
+            2,
+        ]
 
 
 def test_nested_write_failure_rolls_back_only_that_write() -> None:
