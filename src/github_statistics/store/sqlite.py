@@ -5,12 +5,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from . import codec
 from .activity import ActivityStore
 from .base import assignments, chunks, marks
-from .models import DayRange, Member, SyncState
+from .models import DayRange, Item, Member, SyncState
 from .schema import REPOSITORY_TABLES, TABLES
 
 _UPSERT_SYNC = (
@@ -77,6 +77,47 @@ class Store(ActivityStore):
         """Store ``state``, replacing any earlier state for its repository and metric."""
         with self._transaction() as connection:
             connection.execute(_UPSERT_SYNC, codec.sync_row(state))
+
+    def store_item_page(self, items: Iterable[Item], state: SyncState) -> None:
+        """Upsert one listing page of ``items`` and ``state`` in one transaction.
+
+        The watermark in ``state`` then never runs ahead of the items it
+        describes, nor falls behind them (design §6.5). An item listed
+        with ``updated_at`` equal to its ``reviews_read_at`` has that
+        marker cleared: both hold whole seconds, so an update in the
+        second of the read cannot be told from one before it, and
+        enrichment reads the item again (design §6.3).
+        """
+        page = list(items)
+        with self._transaction() as connection:
+            self.upsert_items(page)
+            connection.executemany(
+                "UPDATE items SET reviews_read_at = NULL"
+                " WHERE repo = ? AND number = ? AND reviews_read_at = updated_at",
+                ((item.repo, item.number) for item in page),
+            )
+            self.set_sync_state(state)
+
+    def restart_item_sync(
+        self, state: SyncState, reread_before: datetime | None = None
+    ) -> None:
+        """Store a restarted ``state`` and, given ``reread_before``, mark reviews.
+
+        With ``reread_before``, the pull requests of ``state.repo`` created
+        before it lose their ``reviews_read_at``: a prune drops reviews
+        submitted before its day but keeps a pull request updated since,
+        so a wider window reads the dropped reviews again. Both commit in
+        one transaction, before any page is requested, so a retry that
+        lists nothing does not mark pull requests already read again.
+        """
+        with self._transaction() as connection:
+            if reread_before is not None:
+                connection.execute(
+                    "UPDATE items SET reviews_read_at = NULL"
+                    " WHERE repo = ? AND kind = 'pr' AND created_at < ?",
+                    (state.repo, codec.timestamp(reread_before)),
+                )
+            self.set_sync_state(state)
 
     # Coverage
 
@@ -197,11 +238,14 @@ class Store(ActivityStore):
     def prune(self, before_day: date) -> dict[str, int]:
         """Drop history that ended before ``before_day``; return rows deleted per table.
 
-        Items go once both created and closed before the day, so an item
-        still open stays; reviews and runs go by their own timestamps;
+        Items go once created, closed and last updated before the day, so
+        an item still open stays, and so does one updated since, which
+        enrichment may still re-read; reviews and runs go by their own timestamps;
         coverage ranges are clipped to start on the day; scope intervals
         that ended by the day go, except each repository's latest, which
         stays so a repository that returns is known to have been seen.
+        Each sync has its ``oldest`` raised to the day, since the store no
+        longer holds what it read before it.
         """
         low, _ = codec.day_bounds(before_day, before_day)
         text = codec.day(before_day)
@@ -209,8 +253,8 @@ class Store(ActivityStore):
         with self._transaction() as connection:
             deleted["items"] = connection.execute(
                 "DELETE FROM items WHERE created_at < ?"
-                " AND closed_at IS NOT NULL AND closed_at < ?",
-                (low, low),
+                " AND closed_at IS NOT NULL AND closed_at < ? AND updated_at < ?",
+                (low, low, low),
             ).rowcount
             deleted["reviews"] = connection.execute(
                 "DELETE FROM reviews WHERE submitted_at < ?", (low,)
@@ -223,6 +267,10 @@ class Store(ActivityStore):
             ).rowcount
             connection.execute(
                 "UPDATE coverage SET from_day = ? WHERE from_day < ?", (text, text)
+            )
+            connection.execute(
+                "UPDATE sync_state SET oldest = ? WHERE oldest < ?",
+                (low, low),
             )
             deleted["scope"] = connection.execute(
                 "DELETE FROM scope WHERE to_day IS NOT NULL AND to_day <= ?"
