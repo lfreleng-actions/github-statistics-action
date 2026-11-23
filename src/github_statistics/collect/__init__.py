@@ -14,6 +14,7 @@ from .items import (
     sync_items,
 )
 from .runs import RUNS_METRIC, RunSyncResult, runs_horizon, sync_all_runs, sync_runs
+from .sweep import SweepResult, sweep_runs
 
 __all__ = [
     "ISSUES_METRIC",
@@ -23,8 +24,10 @@ __all__ = [
     "EnrichResult",
     "ItemSyncResult",
     "RunSyncResult",
+    "SweepResult",
     "enrich_items",
     "runs_horizon",
+    "sweep_runs",
     "sync_all_items",
     "sync_all_runs",
     "sync_items",

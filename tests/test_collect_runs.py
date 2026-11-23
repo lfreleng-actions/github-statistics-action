@@ -897,3 +897,149 @@ async def test_every_incremental_read_comes_before_any_backfill() -> None:
         sliced = ["created" in call.request.url.params for call in respx.calls]
         assert sliced == [False] * 3 + [True] * 3
         assert all(result.reached for result in results.values())
+
+
+async def _sweep(store: Any, budget: Any = None) -> Any:
+    """Run ``sweep_runs`` for ``acme/a`` with ``budget`` on its transport."""
+    from github_statistics.client import Transport
+
+    async with Transport(
+        None, sleep=_instant, max_retries=0, budget=budget
+    ) as transport:
+        return await _api().sweep_runs(transport, store, "acme", "a", now=NOW)
+
+
+def _store_run(store: Any, run: dict[str, Any], jobs: int) -> None:
+    """Store ``run``, as listed, with a job count of ``jobs``."""
+    from github_statistics.store import Run
+
+    store.upsert_runs(
+        [
+            Run(
+                id=run["id"],
+                node_id=run["node_id"],
+                repo="acme/a",
+                workflow_path=run["path"],
+                event=run["event"],
+                status=run["status"],
+                conclusion=run["conclusion"],
+                created_at=datetime.fromisoformat(run["created_at"]),
+                actor="alice",
+                actor_type="User",
+                attempt=run["run_attempt"],
+            )
+        ]
+    )
+    store.set_job_counts({run["id"]: jobs})
+
+
+@respx.mock
+async def test_a_sweep_is_not_due_within_seven_days() -> None:
+    _Actions([_listed(1, _at(5))])
+    swept_to = NOW - timedelta(days=7)
+    with _store() as store:
+        _seed(store, watermark=_at(5), etag=ETAG, swept_to=swept_to)
+
+        result = await _sweep(store)
+
+        assert (result.due, result.swept, result.pages) == (False, False, 0)
+        assert respx.calls.call_count == 0
+        assert _state(store).swept_to == swept_to
+
+
+@pytest.mark.parametrize(
+    ("swept_to", "created"),
+    [
+        (_at(2, 6), "2026-01-31T06:00:00Z..2026-03-10T06:00:00Z"),
+        (None, "2026-02-01T06:00:00Z..2026-03-10T06:00:00Z"),
+    ],
+)
+@respx.mock
+async def test_a_sweep_reads_from_thirty_days_before_the_last(
+    swept_to: datetime | None, created: str
+) -> None:
+    actions = _Actions([_listed(1, _at(5)), _listed(2, _at(9))])
+    oldest = _midnight(WINDOW)
+    with _store() as store:
+        _seed(store, watermark=_at(5), etag=ETAG, oldest=oldest, swept_to=swept_to)
+        store.add_coverage("acme/a", "runs", WINDOW, date(2026, 3, 5))
+
+        result = await _sweep(store)
+
+        assert (result.due, result.swept, result.runs) == (True, True, 2)
+        assert actions.created == [created]
+        state = _state(store)
+        assert (state.watermark, state.etag, state.oldest) == (_at(5), ETAG, oldest)
+        assert state.swept_to == NOW
+        assert _coverage(store) == [(WINDOW, date(2026, 3, 5))]
+
+
+@pytest.mark.parametrize("swept_to", [_at(2, 6), _at(23, 6, month=2)])
+@respx.mock
+async def test_a_sweep_finds_a_rerun_and_clears_its_job_count(
+    swept_to: datetime,
+) -> None:
+    first = _listed(1, swept_to - timedelta(days=28))
+    _Actions([dict(first, run_attempt=2)])
+    with _store() as store:
+        _store_run(store, first, jobs=3)
+        _seed(store, watermark=_at(9), etag=ETAG, swept_to=swept_to)
+
+        result = await _sweep(store)
+
+        assert result.swept is True
+        [run] = store.runs_between(date(2026, 1, 1), YESTERDAY)
+        assert (run.attempt, run.jobs) == (2, None)
+
+
+@respx.mock
+async def test_a_sweep_the_budget_cuts_short_resumes_next_run() -> None:
+    from github_statistics.client import Budget
+
+    runs = [_listed(i, _at(5) + timedelta(minutes=i)) for i in range(1, 251)]
+    actions = _Actions(runs)
+    swept_to = _at(1, 6)
+    with _store() as store:
+        _seed(store, watermark=_at(9), etag=ETAG, swept_to=swept_to)
+
+        stopped = await _sweep(store, budget=Budget(rest=2))
+
+        assert (stopped.due, stopped.swept) == (True, False)
+        assert _state(store).swept_to == swept_to
+
+        resumed = await _sweep(store)
+
+        assert resumed.swept is True
+        assert actions.created[-1].startswith("2026-01-30T06:00:00Z..")
+        assert _ids(store) == set(range(1, 251))
+        assert _state(store).swept_to == NOW
+
+
+@respx.mock
+async def test_a_sweep_of_an_unreadable_repository_leaves_swept_to() -> None:
+    respx.get(f"{API}/repos/acme/a/actions/runs").respond(404)
+    swept_to = _at(1, 6)
+    with _store() as store:
+        _seed(store, watermark=_at(5), etag=ETAG, swept_to=swept_to)
+
+        result = await _sweep(store)
+
+        assert (result.swept, result.unreadable) == (False, 404)
+        assert _state(store).swept_to == swept_to
+
+
+@respx.mock
+async def test_a_sweep_moves_swept_to_past_an_hour_over_the_cap() -> None:
+    _Actions(
+        [_listed(i, _at(5, 10) + timedelta(seconds=3 * i)) for i in range(1, 1101)]
+    )
+    with _store() as store:
+        _seed(store, watermark=_at(9), etag=ETAG, swept_to=_at(1, 6))
+
+        result = await _sweep(store)
+
+        assert len(_ids(store)) == 1000
+        assert result.swept is True
+        assert _state(store).swept_to == NOW
+        gap = store.sync_state("acme/a", "runs_gap")
+        assert gap.oldest <= _at(5, 10) < gap.watermark

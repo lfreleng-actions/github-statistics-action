@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 The Linux Foundation
 """Read a repository's runs in ``created=A..B`` date slices (design §6.4).
 
-The run sync's incremental read and backfill read through it, and the
-weekly sweep (#51) can too. The ``runs_gap`` sync state's ``watermark``
+The run sync's incremental read, backfill and weekly re-run sweep read
+through it. The ``runs_gap`` sync state's ``watermark``
 holds the end of the newest range read only up to the listing cap, and
 its ``oldest`` the start of the oldest such range.
 
