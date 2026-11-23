@@ -196,6 +196,32 @@ def test_replace_reviews_replaces_one_pull_requests_set() -> None:
         assert [r.id for r in store.reviews_between(_day(3), _day(3))] == [2, 3]
 
 
+@pytest.mark.xfail(strict=True, reason="store_enrichments not implemented")
+def test_store_enrichments_writes_reviews_and_marks_in_one_transaction() -> None:
+    """Reviews and read markers commit together, or neither does."""
+    from github_statistics.store import Enrichment
+
+    def enrichments(fail: bool = False) -> Any:
+        if fail:
+            raise RuntimeError("interrupted")
+        yield Enrichment("acme/a", 1, None, None, None, None, _at(5))
+
+    with _store() as store:
+        store.upsert_items([_item(), _item(number=2)])
+        store.replace_reviews("acme/a", 2, [_review(3, number=2)])
+        with pytest.raises(RuntimeError):
+            store.store_enrichments(
+                enrichments(fail=True), {("acme/a", 1): [_review(1)]}
+            )
+        assert store.reviews_for("acme/a", 1) == []
+
+        store.store_enrichments(enrichments(), {("acme/a", 1): [_review(1)]})
+
+        assert store.reviews_for("acme/a", 1) == [_review(1)]
+        assert store.reviews_for("acme/a", 2) == [_review(3, number=2)]
+        assert [i.number for i in store.items_needing_enrichment("acme/a", 10)] == [2]
+
+
 def test_run_round_trip_and_job_counts() -> None:
     """Runs round trip; job counts attach and pending runs are listed."""
     pending = _run(2, status="in_progress", conclusion=None)
