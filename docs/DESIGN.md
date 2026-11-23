@@ -1562,7 +1562,9 @@ and nothing published lets a reader infer it.
 
 An empty `member_orgs` means the target owner itself; a target's own
 `identities` block, empty here, overrides the top-level lists key by key
-for that target alone (§7.2).
+for that target alone (§7.2). `budget.graphql_points` must be at
+least 10; the schema rejects a smaller allowance, which may not
+complete one item in a run.
 
 The loader reads one source, highest first: `--config-data`/`config`
 input; `--config PATH`; `$GHS_CONFIG` in the environment;

@@ -92,6 +92,10 @@ def test_schema_accepts_the_design_example() -> None:
         ),
         ({"targets": [{"owner": "acme"}], "window": {"days": 6}}, "window.days"),
         ({"targets": [{"owner": "acme"}], "window": {"days": 731}}, "window.days"),
+        (
+            {"targets": [{"owner": "acme"}], "budget": {"graphql_points": 1}},
+            "budget.graphql_points",
+        ),
         ({"targets": []}, "targets"),
         ({}, "targets"),
         (

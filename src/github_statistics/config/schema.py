@@ -132,7 +132,7 @@ SCHEMA: dict[str, Any] = {
         "budget": _object(
             {
                 "rest": {"type": "integer", "minimum": 1},
-                "graphql_points": {"type": "integer", "minimum": 0},
+                "graphql_points": {"type": "integer", "minimum": 10},
                 "reserve": {"type": ["integer", "null"], "minimum": 0},
             }
         ),
