@@ -100,7 +100,6 @@ def _build(store: Any, config: Any = None) -> Any:
     return build_series(store, config, config.targets[0], until=UNTIL)
 
 
-@pytest.mark.xfail(strict=True)
 def test_window_is_days_ending_on_until() -> None:
     with _store() as store:
         series = _build(store)
@@ -108,7 +107,6 @@ def test_window_is_days_ending_on_until() -> None:
     assert series.repositories == (1,) * 10
 
 
-@pytest.mark.xfail(strict=True)
 def test_owner_of_a_user_owned_target_counts_as_a_member() -> None:
     from github_statistics.config import Config, Identities, Target
     from github_statistics.config.models import Window
@@ -134,7 +132,6 @@ def test_owner_of_a_user_owned_target_counts_as_a_member() -> None:
     assert external == (0, 1, 0, 0, 0, 0, 0, 0, 0, 0)
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize("kind,metric", [("pr", "pull_requests"), ("issue", "issues")])
 def test_items_count_opened_and_closed_on_their_own_days(
     kind: str, metric: str
@@ -158,7 +155,6 @@ def test_items_count_opened_and_closed_on_their_own_days(
     assert series.values(metric, "closed", "external") == (0, 0, 1, 0, 0, 0, 0, 0, 0, 0)
 
 
-@pytest.mark.xfail(strict=True)
 def test_closed_goes_to_the_author_not_the_closer() -> None:
     with _store() as store:
         store.upsert_items(
@@ -177,7 +173,6 @@ def test_closed_goes_to_the_author_not_the_closer() -> None:
     assert series.values("pull_requests", "closed", "external")[2] == 0
 
 
-@pytest.mark.xfail(strict=True)
 def test_reopened_item_counts_as_opened_only() -> None:
     with _store() as store:
         store.upsert_items([_item(1, closed_at=_at(3)), _item(1, closed_at=None)])
@@ -186,7 +181,6 @@ def test_reopened_item_counts_as_opened_only() -> None:
     assert sum(series.values("pull_requests", "closed", "all")) == 0
 
 
-@pytest.mark.xfail(strict=True)
 def test_workflow_runs_jobs_and_outcomes() -> None:
     with _store() as store:
         store.upsert_runs(
@@ -209,7 +203,6 @@ def test_workflow_runs_jobs_and_outcomes() -> None:
     assert series.values("workflows", "jobs", "external_bot")[3] == 3
 
 
-@pytest.mark.xfail(strict=True)
 def test_scheduled_run_is_an_org_bot_whatever_its_actor() -> None:
     with _store() as store:
         store.upsert_runs(
@@ -221,7 +214,6 @@ def test_scheduled_run_is_an_org_bot_whatever_its_actor() -> None:
     assert series.values("workflow_outcomes", "succeeded", "org_bot")[1] == 2
 
 
-@pytest.mark.xfail(strict=True)
 def test_out_of_scope_days_are_not_counted() -> None:
     with _store() as store:
         store.enter_scope("acme/b", _day(4))
@@ -239,7 +231,6 @@ def test_out_of_scope_days_are_not_counted() -> None:
     assert series.repositories == (1, 1, 1, 2, 2, 1, 1, 1, 1, 1)
 
 
-@pytest.mark.xfail(strict=True)
 def test_ignored_logins_are_left_out() -> None:
     with _store() as store:
         store.upsert_items([_item(1, author="Spam[bot]", author_type="Bot"), _item(2)])
@@ -250,7 +241,6 @@ def test_ignored_logins_are_left_out() -> None:
     assert sum(series.values("workflows", "runs", "all")) == 0
 
 
-@pytest.mark.xfail(strict=True)
 def test_aggregates_sum_their_classes() -> None:
     with _store() as store:
         store.upsert_items(
@@ -275,7 +265,6 @@ def test_aggregates_sum_their_classes() -> None:
     assert series.unclassified_bots == ("newapp[bot]",)
 
 
-@pytest.mark.xfail(strict=True)
 def test_disabled_metrics_are_not_built() -> None:
     from github_statistics.config import Config, Target
     from github_statistics.config.models import Window
@@ -370,7 +359,6 @@ _CONTENTS = st.tuples(
 )
 
 
-@pytest.mark.xfail(strict=True)
 @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(_CONTENTS)
 def test_classes_sum_to_all_on_every_day(contents: tuple[list[Any], list[Any]]) -> None:

@@ -72,7 +72,6 @@ def _store() -> Any:
     return store
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize("metric", ["pull_requests", "issues"])
 def test_complete_partial_and_none(metric: str) -> None:
     with _store() as store:
@@ -83,7 +82,6 @@ def test_complete_partial_and_none(metric: str) -> None:
     assert result == "NNPPPCCCPN"
 
 
-@pytest.mark.xfail(strict=True)
 def test_repository_out_of_scope_does_not_need_coverage() -> None:
     with _store() as store:
         store.leave_scope("acme/b", _day(6))
@@ -91,7 +89,6 @@ def test_repository_out_of_scope_does_not_need_coverage() -> None:
         assert _coverage(store, "issues") == "NNPPPCCCCC"
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize("metric", ["workflows", "workflow_outcomes"])
 def test_days_before_the_runs_horizon_are_none(metric: str) -> None:
     with _store() as store:
@@ -101,7 +98,6 @@ def test_days_before_the_runs_horizon_are_none(metric: str) -> None:
         assert _coverage(store, metric) == "NNNNCCCCCC"
 
 
-@pytest.mark.xfail(strict=True)
 def test_unread_job_counts_make_a_workflows_day_partial() -> None:
     with _store() as store:
         for repo in ("acme/a", "acme/b"):

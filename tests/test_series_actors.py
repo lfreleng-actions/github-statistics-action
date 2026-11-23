@@ -36,7 +36,6 @@ def _classify(
     return None if result is None else str(result)
 
 
-@pytest.mark.xfail(strict=True)
 def test_ignored_login_wins_over_every_list() -> None:
     assert (
         _classify(
@@ -49,7 +48,6 @@ def test_ignored_login_wins_over_every_list() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True)
 def test_org_bots_win_over_external_bots() -> None:
     assert (
         _classify("helper", "Bot", org_bots=("helper[bot]",), external_bots=("helper",))
@@ -57,7 +55,6 @@ def test_org_bots_win_over_external_bots() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True)
 def test_listed_external_bot() -> None:
     assert (
         _classify("dependabot[bot]", "Bot", external_bots=("dependabot[bot]",))
@@ -65,19 +62,16 @@ def test_listed_external_bot() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True)
 def test_listed_bot_of_type_user_follows_its_list() -> None:
     assert _classify("Copilot", "User", external_bots=("Copilot",)) == "external_bot"
     assert _classify("releaser", "User", org_bots=("releaser",)) == "org_bot"
 
 
-@pytest.mark.xfail(strict=True)
 def test_unlisted_bot_is_external_even_when_named_a_member() -> None:
     assert _classify("newapp[bot]", "Bot") == "external_bot"
     assert _classify("newapp", "Bot", members=("newapp",)) == "external_bot"
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize(
     ("login", "listed"),
     [
@@ -91,13 +85,11 @@ def test_bot_suffix_and_case_are_ignored(login: str, listed: str) -> None:
     assert _classify(login, "Bot", org_bots=(listed,)) == "org_bot"
 
 
-@pytest.mark.xfail(strict=True)
 def test_explicit_members_list() -> None:
     assert _classify("Alice") == "external"
     assert _classify("Alice", "User", members=("alice",)) == "member"
 
 
-@pytest.mark.xfail(strict=True)
 def test_public_member_is_member_and_private_member_external() -> None:
     from github_statistics.series import classify
 
@@ -107,12 +99,10 @@ def test_public_member_is_member_and_private_member_external() -> None:
     assert classify("bob", "User", identities, public) == "external"
 
 
-@pytest.mark.xfail(strict=True)
 def test_missing_login_is_external() -> None:
     assert _classify(None, None) == "external"
 
 
-@pytest.mark.xfail(strict=True)
 def test_public_members_read_every_member_org_from_the_store() -> None:
     from github_statistics.series.actors import public_members
     from github_statistics.store import Store
@@ -127,7 +117,6 @@ def test_public_members_read_every_member_org_from_the_store() -> None:
     assert "carol" not in members
 
 
-@pytest.mark.xfail(strict=True)
 def test_public_members_match_member_orgs_whatever_their_case() -> None:
     from github_statistics.series import classify
     from github_statistics.series.actors import public_members
@@ -141,7 +130,6 @@ def test_public_members_match_member_orgs_whatever_their_case() -> None:
     assert classify("bob", "User", identities, members) == "external"
 
 
-@pytest.mark.xfail(strict=True)
 def test_owner_of_a_user_owned_target_is_a_member() -> None:
     from github_statistics.series import classify
     from github_statistics.series.actors import public_members
@@ -154,7 +142,6 @@ def test_owner_of_a_user_owned_target_is_a_member() -> None:
     assert classify("joe", "User", identities, members) == "external"
 
 
-@pytest.mark.xfail(strict=True)
 def test_owner_is_a_member_whatever_member_orgs_holds() -> None:
     from github_statistics.series import classify
     from github_statistics.series.actors import public_members
@@ -171,7 +158,6 @@ def test_owner_is_a_member_whatever_member_orgs_holds() -> None:
     assert classify("jane", "User", ignoring, members) is None
 
 
-@pytest.mark.xfail(strict=True)
 def test_unclassified_bots_lists_unlisted_bot_actors_once() -> None:
     from github_statistics.series import unclassified_bots
     from github_statistics.store import Item, Run, Store

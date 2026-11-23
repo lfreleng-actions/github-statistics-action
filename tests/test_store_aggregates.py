@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import importlib
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -66,11 +65,6 @@ def _run(run_id: int, repo: str = "acme/a", **extra: Any) -> Any:
     return Run(**values)
 
 
-def _records() -> Any:
-    """The store package, loaded when a test runs so a missing record fails that test."""
-    return importlib.import_module("github_statistics.store")
-
-
 def _store() -> Any:
     """An in-memory store with ``acme/a`` in scope from 1 March."""
     from github_statistics.store import Store
@@ -80,9 +74,8 @@ def _store() -> Any:
     return store
 
 
-@pytest.mark.xfail(strict=True)
 def test_item_day_counts_group_by_day_and_author() -> None:
-    ActorDayCount = _records().ActorDayCount
+    from github_statistics.store import ActorDayCount
 
     with _store() as store:
         store.upsert_items(
@@ -105,7 +98,6 @@ def test_item_day_counts_group_by_day_and_author() -> None:
     assert closed == [ActorDayCount(_day(5), "bob", "User", 1)]
 
 
-@pytest.mark.xfail(strict=True)
 def test_item_day_counts_reject_unknown_kind_and_column() -> None:
     with _store() as store:
         with pytest.raises(ValueError, match="kind"):
@@ -114,7 +106,6 @@ def test_item_day_counts_reject_unknown_kind_and_column() -> None:
             store.item_day_counts("pr", "merged_at", _day(1), _day(2))
 
 
-@pytest.mark.xfail(strict=True)
 def test_counts_skip_days_a_repository_was_out_of_scope() -> None:
     with _store() as store:
         store.enter_scope("acme/b", _day(3))
@@ -131,9 +122,8 @@ def test_counts_skip_days_a_repository_was_out_of_scope() -> None:
     assert [row.day for row in runs] == [_day(3), _day(4)]
 
 
-@pytest.mark.xfail(strict=True)
 def test_run_day_counts_group_scheduled_runs_without_an_actor() -> None:
-    RunDayCount = _records().RunDayCount
+    from github_statistics.store import RunDayCount
 
     with _store() as store:
         store.upsert_runs(
@@ -153,7 +143,6 @@ def test_run_day_counts_group_scheduled_runs_without_an_actor() -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True)
 def test_days_missing_jobs_lists_concluded_runs_only() -> None:
     with _store() as store:
         store.upsert_runs(
@@ -172,7 +161,6 @@ def test_days_missing_jobs_lists_concluded_runs_only() -> None:
         assert store.days_missing_jobs(_day(1), _day(9)) == [("acme/a", _day(2))]
 
 
-@pytest.mark.xfail(strict=True)
 def test_actors_lists_every_credited_login_once() -> None:
     from github_statistics.store import Review
 
@@ -209,7 +197,6 @@ def test_actors_lists_every_credited_login_once() -> None:
         ]
 
 
-@pytest.mark.xfail(strict=True)
 def test_member_logins_match_organisations_case_insensitively() -> None:
     from github_statistics.store import Store
 
@@ -221,7 +208,6 @@ def test_member_logins_match_organisations_case_insensitively() -> None:
         assert store.member_logins([]) == []
 
 
-@pytest.mark.xfail(strict=True)
 def test_replace_members_reconciles_every_case_of_an_organisation() -> None:
     from github_statistics.store import Member, Store
 
