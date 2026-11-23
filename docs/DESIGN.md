@@ -779,14 +779,30 @@ again and covers their days then. A change in a stored run's `status`,
 `conclusion` or `run_attempt` clears its job count for re-enrichment. A
 re-run keeps its `created_at`, so one older than the listing's first
 page goes unseen by the incremental read. GitHub allows a re-run for 30
-days after the first run, so a sweep (#51), due weekly, re-reads every
-run created since 30 days before the previous completed sweep;
-`swept_to` records, per repository, the time a sweep last completed. A
-sweep that fails or runs out of budget leaves `swept_to` unchanged and
-resumes on the next run, so a missed week widens the next sweep and
-loses nothing. On schedule a sweep covers 37 days, about 530 listing
-pages for this organisation, inside one run's budget; a run older than
-30 days can no longer change.
+days after the first run, so `sweep_runs` (`collect/sweep.py`)
+re-reads a repository's runs once a week. The `runs` sync state's
+`swept_to` records the time a sweep last completed; a sweep is due when
+`swept_to` is unset or more than seven days old. It then reads every
+run created from 30 days before `swept_to`, or with no `swept_to` the
+last 37 days, up to now, through the same `created=` slice reader and
+1,000-item handling as the backfill, and upserts what it reads, so a
+re-run's changed `run_attempt` clears its job count. Its reads record
+no checkpoint: `oldest`, the watermark and coverage stay as they were.
+`swept_to` moves to now when the sweep completes, and not before: one
+that a spent budget or an unreadable repository cuts short leaves it
+unchanged, so the next run sweeps again from the same start, and a
+missed week widens the next sweep and loses nothing. A first sweep has
+no `swept_to` to hold its start, so each retry starts 37 days before
+its own now: a run the cut-short attempt did not reach that falls below
+a retry's start goes unswept. The sweep reads an hour over the cap up
+to the cap and still completes: no later read lists more of it, so
+holding `swept_to` would keep the sweep due on every run, and the
+`runs_gap` sync state records the hour as it does for the other reads.
+`sync_runs` does
+not sweep: the run orchestration (#22) calls `sweep_runs` for a
+repository after its incremental read and backfill. On schedule a sweep
+covers 37 days, about 530 listing pages for this organisation, inside
+one run's budget; a run older than 30 days can no longer change.
 
 Jobs: there is no job count in the listing and `/runs/{id}/jobs` costs one
 request per run, which at this organisation's volume (§6.6) is
