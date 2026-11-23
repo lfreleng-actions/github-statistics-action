@@ -196,7 +196,6 @@ def test_replace_reviews_replaces_one_pull_requests_set() -> None:
         assert [r.id for r in store.reviews_between(_day(3), _day(3))] == [2, 3]
 
 
-@pytest.mark.xfail(strict=True, reason="store_enrichments not implemented")
 def test_store_enrichments_writes_reviews_and_marks_in_one_transaction() -> None:
     """Reviews and read markers commit together, or neither does."""
     from github_statistics.store import Enrichment

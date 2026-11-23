@@ -22,8 +22,6 @@ REPO = "acme/a"
 ALICE = {"login": "alice", "__typename": "User"}
 BOT = {"login": "lf-releng-code-monkey-bot", "__typename": "Bot"}
 
-pytestmark = pytest.mark.xfail(strict=True, reason="enrichment not implemented")
-
 
 def _api() -> Any:
     """The collector, loaded when a test runs so a missing one fails that test."""

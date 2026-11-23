@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from .enrich_items import EnrichResult, enrich_items
 from .items import (
     ISSUES_METRIC,
     ITEMS_METRIC,
@@ -19,8 +20,10 @@ __all__ = [
     "ITEMS_METRIC",
     "PULL_REQUESTS_METRIC",
     "RUNS_METRIC",
+    "EnrichResult",
     "ItemSyncResult",
     "RunSyncResult",
+    "enrich_items",
     "runs_horizon",
     "sync_all_items",
     "sync_all_runs",
