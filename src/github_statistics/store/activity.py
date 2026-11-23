@@ -104,6 +104,21 @@ class ActivityStore(StoreBase):
                 ),
             )
 
+    def store_enrichments(
+        self,
+        enrichments: Iterable[Enrichment],
+        reviews: Mapping[tuple[str, int], Iterable[Review]],
+    ) -> None:
+        """Replace reviews by ``(repo, number)`` and mark items enriched, together.
+
+        One transaction, so an item is never marked read without the
+        reviews it was read with (design §6.3).
+        """
+        with self._transaction():
+            for (repo, number), item_reviews in reviews.items():
+                self.replace_reviews(repo, number, item_reviews)
+            self.mark_enriched(enrichments)
+
     def items_between(
         self, from_day: date, to_day: date, repos: Sequence[str] | None = None
     ) -> list[Item]:
