@@ -630,9 +630,12 @@ cost a request per pull request. One GraphQL `nodes(ids: [...])` query
 per fifty stored item `node_id`s, pull requests and issues together
 with a fragment per type, reads:
 
-- `reviews(first: 50)`: author login and `__typename`,
+- `reviews(first: 50)`: node `id`, `fullDatabaseId` (review ids have
+  outgrown the 32-bit `databaseId`), author login and `__typename`,
   `state` and `submittedAt` per review, with
-  `totalCount` so a pull request with more reviews pages on its own;
+  `totalCount` so a pull request with more reviews pages on its own,
+  a hundred at a time, after every batch; the tool skips a `PENDING`
+  review, which its author has not yet submitted;
 - `mergedBy`, and for issues and unmerged pull requests the actor
   of the last `CLOSED_EVENT` in `timelineItems`: login and `__typename`
   for each, so an unlisted bot that merges or closes and does nothing
@@ -644,10 +647,48 @@ close does, so
 the ordinary incremental sync picks up late reviews. Both hold whole
 seconds, so a listed `updated_at` equal to `reviews_read_at` may be an
 update after the read in the same second: storing the listing page
-clears the marker on such an item, and enrichment reads it again. At about
-twenty-five points a query (fifty pull requests with up to fifty reviews
-each), a year of pull requests costs some thousands of GraphQL points once
-and a handful a day afterwards (§6.6).
+clears the marker on such an item, and enrichment reads it again.
+This holds because enrichment runs after the listing sync, never
+alongside it (§6.5): a page stored while a read is in flight would
+clear nothing, and the read would then mark the item. Each
+read replaces the pull request's stored reviews, so a dismissed review
+changes state, and sets `reviews_read_at` to the `updated_at` the item
+had when read. The items updated last go first, and recent days
+complete first when the budget runs out; a last point, too few for a
+batch, reads one item alone for one point. The tool sets aside a pull
+request with more reviews than its first page holds, reads and stores
+every batch, then pages those set aside in ascending `totalCount`. So
+a pull request with a long review history can delay itself and longer
+ones alone; it never holds back an item that fits in one page. One
+whose pages the budget cuts off keeps its stored reviews and stays
+queued, and the run logs a warning naming it; one whose pages exceed a
+whole run's budget is never completed, an accepted limit. A failed
+review page has one of three outcomes. A pull request GitHub no longer
+finds goes in `failed` on its own, and the paging carries on. A
+`502`/`504`, a transport error, or any error GitHub reports in an HTTP
+`200` payload that is not request-wide, such as a timeout, means
+GitHub is failing, not the item: the run logs the pull request it
+stopped at and ends the paging, and that pull request and every one
+not yet paged stay queued. A request-wide error, such as a query
+GitHub refused to run, or any other HTTP status, stops the run, as it
+does a batch. A budget smaller than the first
+pages queued can complete no item, also an accepted limit, and the run
+then logs a warning naming `budget.graphql_points`.
+
+A deleted account comes back as a `null` author, merger or actor, and
+the tool stores it as `ghost` with type `User`. A node that comes back
+`null`, the item deleted or transferred, keeps its stored fields and
+gains a `reviews_read_at`, and no later run reads it again until it
+changes. The query reads each node's repository and number, and the
+tool reads rows sharing a node id once: the row stored where GitHub
+places the node takes it and its reviews, and every other row keeps
+its stored fields as a `null` node does.
+
+Measured against this organisation on 2026-11-16, the query cost **1
+point** for three merged pull requests and one closed issue; by GitHub's
+cost formula a batch of fifty costs 1 to 2 points, so a year of this
+organisation's 23,000 items costs some hundreds of GraphQL points once and
+a handful a day afterwards (§6.6).
 
 Reviews feed the reviewer columns of the leaderboard (§7.4) and the
 data export; the reviewer's actor class comes from the same classifier
@@ -848,7 +889,7 @@ From GSR's ADR-0007 measurements (2026-10-15, 143 active repositories):
 | Warm day: new items             | a handful of REST pages and GraphQL points |                                           |
 | Warm day: members               | one REST page per 100 public members       |                                           |
 | Cold: items, 365 days           | low hundreds of REST pages                 | volume unknown; measured in the spike     |
-| Cold: reviews for a year of PRs | ~25 GraphQL points per 50 PRs              | about 5,000 points for 10,000 PRs         |
+| Cold: reviews for a year of PRs | 1 to 2 GraphQL points per 50 items         | some hundreds of points for 23,000 items  |
 | Cold: runs, 365 days (~520k)    | ~5,500 REST pages, ~6.5 GB transfer        | two or three runs at a 3,000 budget       |
 | Cold: job counts for ~520k runs | ~10,400 GraphQL points                     | 5,000 points per hour; three or four runs |
 
