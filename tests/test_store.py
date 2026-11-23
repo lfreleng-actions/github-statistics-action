@@ -320,6 +320,43 @@ def test_store_item_page_writes_items_and_watermark_together() -> None:
         assert store.sync_state("acme/a", "items") == state
 
 
+def test_store_run_page_writes_runs_and_state_together() -> None:
+    """Runs and their sync state commit together, or neither does."""
+    from github_statistics.store import SyncState
+
+    with _store() as store:
+        state = SyncState("acme/a", "runs", watermark=_at(2), etag='W/"1"')
+        store.store_run_page([_run(1)], state)
+        assert store.counts()["runs"] == 1
+        assert store.sync_state("acme/a", "runs") == state
+
+        naive = SyncState("acme/a", "runs", watermark=datetime(2026, 3, 3))
+        with pytest.raises(ValueError):
+            store.store_run_page([_run(2)], naive)
+
+        assert store.counts()["runs"] == 1
+        assert store.sync_state("acme/a", "runs") == state
+
+
+def test_earliest_run_day_is_per_owner() -> None:
+    """The oldest run day of an owner's repositories, owner compared without case."""
+    with _store() as store:
+        assert store.earliest_run_day("acme") is None
+        store.upsert_runs(
+            [
+                _run(1, created_at=_at(5)),
+                _run(2, repo="Acme/b", created_at=_at(3, hour=23)),
+                _run(3, repo="acme_x/c", created_at=_at(1)),
+                _run(4, repo="other/d", created_at=_at(1)),
+            ]
+        )
+
+        assert store.earliest_run_day("acme") == _day(3)
+        assert store.earliest_run_day("ACME") == _day(3)
+        assert store.earliest_run_day("acme_x") == _day(1)
+        assert store.earliest_run_day("nobody") is None
+
+
 def test_store_item_page_clears_a_read_marker_in_the_listed_second() -> None:
     """A listed update in the second of the last read leaves the item to re-read."""
     from github_statistics.store import SyncState

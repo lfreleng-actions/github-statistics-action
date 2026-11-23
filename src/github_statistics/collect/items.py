@@ -12,7 +12,6 @@ day, so only a listing read to its end proves any day complete.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import logging
 from dataclasses import dataclass
@@ -22,15 +21,11 @@ from urllib.parse import quote
 
 import httpx
 
-from github_statistics.client import (
-    AuthError,
-    BudgetExhaustedError,
-    Transport,
-    get_paged,
-)
-from github_statistics.client.policy import rate_limited
+from github_statistics.client import BudgetExhaustedError, Transport, get_paged
 from github_statistics.scope import ResolvedScope
 from github_statistics.store import Item, Store, SyncState
+
+from .common import run_concurrently, scope_keys, unreadable_status
 
 log = logging.getLogger(__name__)
 
@@ -41,8 +36,6 @@ PULL_REQUESTS_METRIC = "pull_requests"
 COVERAGE_METRICS = (ISSUES_METRIC, PULL_REQUESTS_METRIC)
 
 GHOST = "ghost"
-UNREADABLE_STATUSES = frozenset({403, 404, 410})
-SERVER_ERROR = 500
 _OVERLAP = timedelta(seconds=1)
 
 
@@ -198,15 +191,12 @@ async def sync_items(
     except BudgetExhaustedError as exc:
         log.info("stopped syncing items of %s: %s", key, exc)
     except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-        if rate_limited(exc.response):
-            # An unbudgeted transport returns a rate limit its retries left.
-            log.info("stopped syncing items of %s: rate limited (%s)", key, status)
-        elif status in UNREADABLE_STATUSES or status >= SERVER_ERROR:
+        status = unreadable_status(exc)
+        if status is None:
+            log.info("stopped syncing items of %s: rate limited", key)
+        else:
             log.warning("cannot read items of %s: HTTP %s", key, status)
             return ItemSyncResult(key, stored, pages, drained=False, unreadable=status)
-        else:
-            raise
     if drained:
         store.set_sync_state(dataclasses.replace(state, last_sync_at=now))
         _add_coverage(store, key, window_start, now)
@@ -231,28 +221,18 @@ async def sync_all_items(
     repository, ``AuthError`` first, propagates as itself, not wrapped
     in an ``ExceptionGroup``, and cancels the other repositories.
     """
-    spellings = {key.lower(): key for key in store.in_scope(now.astimezone(UTC).date())}
-    keys = [
-        spellings.get(key.lower(), key)
-        for key in (
-            f"{scope.owner}/{repository.name}" for repository in scope.repositories
-        )
-    ]
 
     def fresh(key: str) -> bool:
         """Whether ``key`` has no watermark yet."""
         state = store.sync_state(key, ITEMS_METRIC)
         return state is None or state.watermark is None
 
-    tasks = []
-    try:
-        async with asyncio.TaskGroup() as group:
-            for key in sorted(keys, key=fresh):
-                owner, _, name = key.partition("/")
-                sync = sync_items(
-                    transport, store, owner, name, window_start=window_start, now=now
-                )
-                tasks.append(group.create_task(sync))
-    except ExceptionGroup as failures:
-        raise (failures.subgroup(AuthError) or failures).exceptions[0] from None
-    return {task.result().repo: task.result() for task in tasks}
+    syncs = []
+    for key in sorted(scope_keys(store, scope, now), key=fresh):
+        owner, _, name = key.partition("/")
+        syncs.append(
+            sync_items(
+                transport, store, owner, name, window_start=window_start, now=now
+            )
+        )
+    return {result.repo: result for result in await run_concurrently(syncs)}
