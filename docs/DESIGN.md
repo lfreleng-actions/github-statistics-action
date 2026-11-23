@@ -980,6 +980,10 @@ run reads every page of `GET /orgs/{org}/public_members` for every
 organisation in
 `member_orgs` and stores the logins with first- and last-seen dates;
 the endpoint needs no permission and gives every caller the same list.
+The classifier matches organisation names whatever their case, as
+GitHub does, so a `member_orgs` entry `ACME` reads the members stored
+for `acme`, and a refresh under any spelling replaces the list stored
+under every other.
 A member who keeps their membership private counts as `external`, as
 GitHub itself presents them to the public.
 
@@ -997,8 +1001,12 @@ The explicit `members` list stays for an operator who chooses to name
 members. Naming a login publishes that membership, by the same
 inference, so the list belongs empty unless each person named agrees.
 For a
-target owned by a user rather than an organisation, the owner alone is
-a member, plus anyone in `members`.
+target owned by a user rather than an organisation, the owner is a
+member whatever `member_orgs` holds, alongside anyone in `members` and
+the public members of each organisation `member_orgs` names: the
+classifier counts the target owner and each name in `member_orgs` as a
+member itself, which for an organisation changes nothing, since an
+organisation never acts on its own account.
 
 The classifier applies membership as it stands today to the whole window: someone
 who joined this year counts as a member for last year's work too. The
@@ -1055,17 +1063,66 @@ and where each came from: `cli`, `target`, `config` or `default`.
 ### 7.3 Daily series
 
 Days are UTC calendar days; the window is the `days` days ending on
-`until` (yesterday by default, so the newest bar is a complete day). For
-each target, metric, series and actor class the aggregator emits one
-integer per day, plus per-day coverage: **complete** when every
-repository in scope that day has coverage over it for that metric,
-**partial** when some do, **none** when none does. Partial and none
-become gap columns (§8.3); the page footer states the count.
+`until` (yesterday by default, so the newest bar is a complete day).
+`build_series` reads the store and the configuration and nothing else:
+it takes `until` as a parameter, reads no clock and makes no request.
+For each target, metric, series and actor class it emits one integer
+per day, for the four classes and the `humans`, `bots` and `all`
+aggregates, plus per-day coverage per metric, the number of
+repositories in scope each day, and the unclassified bots (§7.1).
 
-Attribution per event: the item's author for issues and pull requests,
-opened and closed alike (§6.2); the triggering actor for workflow runs
-and their jobs. Charts default to five views per metric (`all` and the
-four classes); `classes` in the configuration can add the `humans` and
+<!-- markdownlint-disable MD013 -->
+
+| Metric              | Series                 | Counted on the day of                  | Class of             |
+| ------------------- | ---------------------- | -------------------------------------- | -------------------- |
+| `pull_requests`     | `opened`               | `created_at`                           | the author           |
+| `pull_requests`     | `closed`               | `closed_at`, merged or not             | the author           |
+| `issues`            | `opened`               | `created_at`                           | the author           |
+| `issues`            | `closed`               | `closed_at`                            | the author           |
+| `workflows`         | `runs`                 | the run's `created_at`                 | the triggering actor |
+| `workflows`         | `jobs`                 | the run's `created_at`, summing `jobs` | the triggering actor |
+| `workflow_outcomes` | `succeeded` / `failed` | the run's `created_at`                 | the triggering actor |
+
+<!-- markdownlint-enable MD013 -->
+
+Every count goes to the item's author (§6.2): a member's pull request
+merged on 3 March counts as closed for members on 3 March, whoever
+pressed the button. `succeeded` is the conclusion `success`; `failed`
+is `failure`, `startup_failure` or `timed_out`; other conclusions count
+in neither. The store holds an item's latest state, so a reopened item
+counts as closed again when, and on the day, it closes again.
+
+**Scheduled runs are the organisation's automation, not a person's
+work.** GitHub reports a scheduled run's triggering actor as whoever
+last changed the schedule (measured: a daily job attributed to a
+maintainer). A run whose `event` is `schedule` so counts as `org_bot`
+whatever its actor, `ignore_logins` included, and the tool credits it
+to no login: it never makes its actor an unclassified bot.
+
+An event counts when its repository was in scope that day (the
+`scope` table, §6.1), and never otherwise, nor for an ignored login. The store groups
+the counts in SQL by day and `(login, type)`, so the classifier runs
+once per distinct actor rather than once per row.
+
+Coverage, per metric and day: **complete** when every repository in
+scope that day has coverage over it for that metric (`runs` coverage
+for both workflow metrics), **partial** when some do, **none** when
+none does or no repository is in scope. Two rules override it:
+
+- **Runs horizon.** A day before the oldest run stored for the owner is
+  `none` for `workflows` and `workflow_outcomes`, whatever the coverage
+  table says: GitHub lists runs about 354 days back and no further,
+  and an empty answer for an older day is not a zero.
+- **Jobs.** A day on which a concluded run of a repository in scope
+  still has no job count is at best `partial` for `workflows`. During a
+  cold start the job counts take days to fill in, and those days chart
+  as gaps, not as low job counts. A run that has not concluded does
+  not hold its day back: it counts as a run and adds no jobs until the
+  collector reads its count.
+
+Partial and none become gap columns (§8.3); the page footer states the
+count. Charts default to five views per metric (`all` and the four
+classes); `classes` in the configuration can add the `humans` and
 `bots` aggregates or drop views.
 
 ### 7.4 Leaderboards and repository table
