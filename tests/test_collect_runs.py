@@ -399,7 +399,6 @@ async def test_spent_budget_keeps_each_whole_day_part_of_a_split_slice() -> None
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_probe_cut_short_by_the_budget_marks_nothing_read() -> None:
     from github_statistics.client import Budget
@@ -457,7 +456,6 @@ async def test_spent_budget_keeps_each_hour_of_a_split_day() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_resumed_day_is_covered_when_the_backfill_reaches_the_horizon() -> None:
     from github_statistics.client import Budget
@@ -606,7 +604,6 @@ async def test_spent_budget_between_pages_of_a_slice_resumes_below_them() -> Non
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_quiet_gap_is_probed_across_and_covered() -> None:
     window = date(2026, 1, 14)
@@ -629,7 +626,6 @@ async def test_a_quiet_gap_is_probed_across_and_covered() -> None:
         assert _coverage(store) == [(window, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_an_empty_window_start_is_covered_when_older_runs_are_listed() -> None:
     actions = _Actions([_listed(0, _at(9)), _listed(1, _at(20, month=2))])
@@ -645,7 +641,6 @@ async def test_an_empty_window_start_is_covered_when_older_runs_are_listed() -> 
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_backfill_ends_at_the_listing_horizon() -> None:
     window = date(2026, 1, 1)

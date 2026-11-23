@@ -740,25 +740,28 @@ later incremental read covers its day either; the incremental read that
 meets such an hour still covers the days after it. Its `oldest` keeps
 the start of the oldest such hour, and the backfill covers no day from
 that one up, so a backfill resumed within a day an incremental read
-left incomplete does not cover it. The `runs_backfill`
-sync state's watermark keeps the start of the oldest part the backfill
-could not read in full, so a backfill resumed within that day does not
-cover it. A day gains coverage once the collector holds
-every run created on it. Every repository's incremental read finishes
-before any backfill starts, which keeps the newest days current while
-history fills in.
+left incomplete does not cover it. A day gains coverage once the
+collector holds every run created on it. Every repository's incremental
+read finishes before any backfill starts, which keeps the newest days
+current while history fills in.
 
 GitHub lists runs back about 354 days (measured 2026-11-16), short of
-the 365-day window. Two empty week slices in a row older than every run
-the repository holds, or empty slices down to the window start, end the
-backfill at that listing horizon without
-covering the empty slices; the first of them below an intra-day
-`oldest` completes that day, which gains coverage. The `runs_backfill`
-sync state keeps how far
-down the backfill read empty slices, so a sync that runs out of budget
-after one resumes below it rather than reading it again. `runs_horizon`
-reports the day of the oldest run held per owner, and the CI chart shows
-the days before it as no data.
+the 365-day window. A quiet fortnight looks the same as that horizon
+to a slice, so after a week slice comes back empty the backfill sends
+one probe, `created=<` the slice's start with `per_page=1`, which
+answers whether the listing holds anything older. When the probe lists
+a run, the listing holds none created from the day after it up to
+`oldest`: those days gain coverage, `oldest` moves to midnight after
+that run's day (or to the window start, if that is later), and the
+backfill reads on from the week slice ending on that day, without
+reading the empty weeks between. When the probe lists none, the
+backfill ends at the listing horizon: `oldest` moves to the window
+start, and no day of the empty slice or below it gains coverage, except
+the day of an intra-day `oldest` that the empty slice completes. The
+probe costs one request from the budget; a budget spent before it marks
+nothing read, so the next sync reads the empty slice again and then
+probes. `runs_horizon` reports the day of the oldest run held per
+owner, and the CI chart shows the days before it as no data.
 
 Runs still in progress are re-read by id on later syncs until they
 conclude, at most 50 per repository per sync. The incremental read's
@@ -1368,7 +1371,7 @@ so.
 | Bot list missing a new app          | Counted as an external bot and named as unclassified       | `doctor`/run warning names the login; place it in config; re-render     |
 | Repository turns private            | It leaves the scope on the next run                        | The run deletes its rows; charts, tables and exports drop it            |
 | Scope names a private repository    | Skipped, with a warning that names it                      | None needed: out of scope by design (§5)                                |
-| GitHub no longer lists old runs     | Slices past the listing horizon return empty               | Backfill stops there; days before `runs_horizon` chart as no data       |
+| GitHub no longer lists old runs     | An empty slice's `created=<` probe lists no older run      | Backfill stops there; days before `runs_horizon` chart as no data       |
 | Pages deploy fails                  | Site stale, data saved                                     | Slack notice names the failed job; re-run via dispatch                  |
 
 <!-- markdownlint-enable MD013 -->
