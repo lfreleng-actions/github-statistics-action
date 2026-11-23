@@ -668,19 +668,73 @@ Runs: `GET /repos/{o}/{r}/actions/runs?per_page=100&created=A..B` with
 the date-slicing, ETag and watermark logic of GSR's `run_sync`, because
 the listing stops after 1,000 items and a busy week exceeds that per
 repository. Per run: `created_at`, `event`, `conclusion`,
-`triggering_actor`, `run_attempt`, `node_id`. Runs still in progress are
-re-read on later syncs until they conclude, and a change in a stored
-run's `status`, `conclusion` or `run_attempt` clears its job count for
-re-enrichment. A re-run keeps its `created_at`, so one older than the
-listing's first page goes unseen by the incremental read. GitHub allows
-a re-run for 30 days after the first run, so a sweep, due weekly,
-re-reads every run created since 30 days before the previous completed
-sweep; `swept_to` records, per repository, the time a sweep last
-completed. A sweep that fails or runs out of budget leaves `swept_to`
-unchanged and resumes on the next run, so a missed week widens the
-next sweep and loses nothing. On schedule a sweep covers 37 days,
-about 530 listing pages for this organisation, inside one run's
-budget; a run older than 30 days can no longer change.
+`triggering_actor`, `run_attempt`, `node_id`.
+
+`collect/runs.py` reads each repository in two phases. The incremental
+read lists runs newest first until it passes the stored watermark,
+reading every run that shares its second, and sends the first page with
+the stored ETag so an unchanged listing costs a free `304`. When the
+listing stops at its cap, or the budget runs out while paging, above
+the watermark, the read keeps the runs read and records the range below
+them as the `runs_hole` sync state. `created=` slices fill it, at once
+at the cap and first thing on the next sync after a spent budget; the
+hole's top moves down after each page read, so a fill cut short resumes
+below it, and its days gain coverage once the fill completes. A filled
+hole keeps its start until the read that covers its days commits, so a
+budget spent between the fill and that coverage loses neither. A first
+sync has no watermark: it keeps the runs read and leaves everything
+below them to the backfill.
+The runs read and the new watermark, ETag and `oldest` commit
+in one transaction. The backfill then reads week slices below `oldest`,
+newest first, down to the window start. A slice whose `total_count`
+exceeds the cap halves in whole days, then splits into hours, read
+newest first; `oldest` advances after each part, hours included, and
+to the second above the oldest run read when the budget runs out
+between pages. The whole days read gain coverage, so a sync that runs
+out of budget mid-slice resumes below it. The `created=` slice reader
+lives in `collect/reader.py`. The collector reads an hour still over the
+cap up to the cap and adds no coverage for its day. The `runs_gap` sync
+state keeps the end of the newest such hour as its watermark, so no
+later incremental read covers its day either; the incremental read that
+meets such an hour still covers the days after it. Its `oldest` keeps
+the start of the oldest such hour, and the backfill covers no day from
+that one up, so a backfill resumed within a day an incremental read
+left incomplete does not cover it. The `runs_backfill`
+sync state's watermark keeps the start of the oldest part the backfill
+could not read in full, so a backfill resumed within that day does not
+cover it. A day gains coverage once the collector holds
+every run created on it. Every repository's incremental read finishes
+before any backfill starts, which keeps the newest days current while
+history fills in.
+
+GitHub lists runs back about 354 days (measured 2026-11-16), short of
+the 365-day window. Two empty week slices in a row older than every run
+the repository holds, or empty slices down to the window start, end the
+backfill at that listing horizon without
+covering the empty slices; the first of them below an intra-day
+`oldest` completes that day, which gains coverage. The `runs_backfill`
+sync state keeps how far
+down the backfill read empty slices, so a sync that runs out of budget
+after one resumes below it rather than reading it again. `runs_horizon`
+reports the day of the oldest run held per owner, and the CI chart shows
+the days before it as no data.
+
+Runs still in progress are re-read by id on later syncs until they
+conclude, at most 50 per repository per sync. The incremental read's
+coverage waits for these re-reads; one that finds the repository
+unreadable puts its sync state back, so the next sync reads those runs
+again and covers their days then. A change in a stored run's `status`,
+`conclusion` or `run_attempt` clears its job count for re-enrichment. A
+re-run keeps its `created_at`, so one older than the listing's first
+page goes unseen by the incremental read. GitHub allows a re-run for 30
+days after the first run, so a sweep (#51), due weekly, re-reads every
+run created since 30 days before the previous completed sweep;
+`swept_to` records, per repository, the time a sweep last completed. A
+sweep that fails or runs out of budget leaves `swept_to` unchanged and
+resumes on the next run, so a missed week widens the next sweep and
+loses nothing. On schedule a sweep covers 37 days, about 530 listing
+pages for this organisation, inside one run's budget; a run older than
+30 days can no longer change.
 
 Jobs: there is no job count in the listing and `/runs/{id}/jobs` costs one
 request per run, which at this organisation's volume (§6.6) is
@@ -1273,17 +1327,18 @@ so.
 | Bot list missing a new app          | Counted as an external bot and named as unclassified       | `doctor`/run warning names the login; place it in config; re-render     |
 | Repository turns private            | It leaves the scope on the next run                        | The run deletes its rows; charts, tables and exports drop it            |
 | Scope names a private repository    | Skipped, with a warning that names it                      | None needed: out of scope by design (§5)                                |
-| GitHub no longer lists old runs     | Oldest slice returns empty                                 | Coverage marks it none; the spike (§10.1) confirms retention            |
+| GitHub no longer lists old runs     | Slices past the listing horizon return empty               | Backfill stops there; days before `runs_horizon` chart as no data       |
 | Pages deploy fails                  | Site stale, data saved                                     | Slack notice names the failed job; re-run via dispatch                  |
 
 <!-- markdownlint-enable MD013 -->
 
 ### 10.1 Questions for the spike
 
-- Workflow-run records a year old still appear in the listing (GSR
-  measured 90 days). If GitHub caps listing age, the CI window cannot
-  exceed it, and the store becomes the sole source of older days, which
-  raises the value of the artifact fallback.
+- Workflow-run records a year old do not all appear in the listing: it
+  reaches back about 354 days (measured 2026-11-16; GSR measured 90).
+  The CI window cannot exceed that horizon, and the store becomes the
+  sole source of older days, which raises the value of the artifact
+  fallback.
 - `checkRuns(filterBy: {checkType: ALL}).totalCount` versus `LATEST`:
   which one matches the intuition "jobs that ran today" for re-runs,
   and that the restricted token of §9.2 can run the query.
