@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -602,6 +603,34 @@ async def test_spent_budget_between_pages_of_a_slice_resumes_below_them() -> Non
         assert actions.created[-1] == "2026-03-01T00:00:00Z..2026-03-02T12:35:00Z"
         assert _ids(store) == set(range(1, 351))
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
+
+
+@pytest.mark.xfail(strict=True)
+@respx.mock
+async def test_a_read_the_budget_stops_within_one_second_is_stalled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from github_statistics.client import Budget
+
+    runs = [_listed(0, _at(9))]
+    runs += [_listed(i, _at(7, 12)) for i in range(1, 151)]
+    _Actions(runs)
+    with _store() as store:
+        _seed(store, watermark=_at(9), etag=ETAG, oldest=_midnight(date(2026, 3, 8)))
+
+        first = await _sync(store, budget=Budget(rest=2))
+
+        resume = _at(7, 12) + timedelta(seconds=1)
+        assert first.stalled is False
+        assert _state(store).oldest == resume
+
+        with caplog.at_level(logging.WARNING):
+            again = await _sync(store, budget=Budget(rest=2))
+
+        assert again.stalled is True
+        assert _state(store).oldest == resume
+        assert "acme/a" in caplog.text
+        assert "2026-03-07T12:00:00Z" in caplog.text
 
 
 @respx.mock
