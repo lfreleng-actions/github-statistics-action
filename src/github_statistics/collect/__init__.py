@@ -13,6 +13,7 @@ from .items import (
     sync_all_items,
     sync_items,
 )
+from .jobs import JobsResult, enrich_jobs
 from .runs import RUNS_METRIC, RunSyncResult, runs_horizon, sync_all_runs, sync_runs
 from .sweep import SweepResult, sweep_runs
 
@@ -23,9 +24,11 @@ __all__ = [
     "RUNS_METRIC",
     "EnrichResult",
     "ItemSyncResult",
+    "JobsResult",
     "RunSyncResult",
     "SweepResult",
     "enrich_items",
+    "enrich_jobs",
     "runs_horizon",
     "sweep_runs",
     "sync_all_items",

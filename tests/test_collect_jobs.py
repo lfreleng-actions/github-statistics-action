@@ -116,7 +116,6 @@ def _jobs(store: Any) -> dict[int, int | None]:
     return dict(rows.fetchall())
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_mixed_batch_stores_counts_newest_first() -> None:
     runs = [_run(n, created=datetime(2026, 3, n, tzinfo=UTC)) for n in (1, 2, 3, 4)]
@@ -134,7 +133,6 @@ async def test_mixed_batch_stores_counts_newest_first() -> None:
         assert store.runs_needing_jobs(10) == []
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_runs_in_progress_wait_for_their_conclusion() -> None:
     route = _serve(_data({"WFR_1": _node(1, 2)}))
@@ -146,7 +144,6 @@ async def test_runs_in_progress_wait_for_their_conclusion() -> None:
         assert _jobs(store) == {1: 2, 2: None}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_runs_out_of_scope_are_not_read() -> None:
     excluded = _run(2, created=datetime(2026, 3, 2, tzinfo=UTC), repo="acme/gone")
@@ -160,7 +157,6 @@ async def test_runs_out_of_scope_are_not_read() -> None:
         assert _jobs(store) == {1: 4, 2: None}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_deleted_run_stores_zero_after_halving() -> None:
     def answer(variables: dict[str, Any]) -> httpx.Response:
@@ -186,7 +182,6 @@ async def test_deleted_run_stores_zero_after_halving() -> None:
         assert _jobs(store) == {1: 5, 2: 0}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_rerun_after_counting_is_counted_again() -> None:
     counts = iter((14, 15))
@@ -207,7 +202,6 @@ async def test_rerun_after_counting_is_counted_again() -> None:
         assert _jobs(store) == {1: 15}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_stops_cleanly_newest_first() -> None:
     from github_statistics.client import Budget
@@ -227,7 +221,6 @@ async def test_spent_budget_stops_cleanly_newest_first() -> None:
         assert [r.id for r in store.runs_needing_jobs(10)] == [1]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_last_point_reads_one_run() -> None:
     from github_statistics.client import Budget
@@ -242,7 +235,6 @@ async def test_last_point_reads_one_run() -> None:
         assert _jobs(store) == {1: None, 2: 2}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_budget_completing_no_run_names_the_setting(
     caplog: pytest.LogCaptureFixture,
@@ -259,7 +251,6 @@ async def test_budget_completing_no_run_names_the_setting(
         assert caplog.text.count("budget.graphql_points") == 1
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 @pytest.mark.parametrize("points", [None, 1])
 async def test_forbidden_check_suite_stops_with_one_warning(
@@ -296,7 +287,6 @@ async def test_forbidden_check_suite_stops_with_one_warning(
         assert "checks: read" in warnings[0].getMessage()
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_batch_is_halved_after_a_502() -> None:
     answer = _data({"WFR_1": _node(1, 4), "WFR_2": _node(2, 6)})
@@ -316,7 +306,6 @@ async def test_batch_is_halved_after_a_502() -> None:
         assert _jobs(store) == {1: 4, 2: 6}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_id_failing_alone_is_left_for_the_next_run() -> None:
     def answer(variables: dict[str, Any]) -> httpx.Response:
@@ -331,7 +320,6 @@ async def test_id_failing_alone_is_left_for_the_next_run() -> None:
         assert _jobs(store) == {1: None}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_transport_error_ends_the_step_keeping_counts(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
@@ -368,7 +356,6 @@ def _jobs_coverage(store: Any) -> list[tuple[int, int]]:
     return [(r.from_day.day, r.to_day.day) for r in store.coverage(REPO, "jobs")]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_counts_restore_jobs_coverage_within_runs_coverage() -> None:
     runs = [_run(n, created=_day(d)) for n, d in ((1, 1), (2, 2), (3, 2), (4, 5))]
@@ -387,7 +374,6 @@ async def test_counts_restore_jobs_coverage_within_runs_coverage() -> None:
         assert _jobs_coverage(store) == [(1, 4)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_partial_counts_cover_only_fully_counted_days() -> None:
     from github_statistics.client import Budget
