@@ -808,13 +808,41 @@ Jobs: there is no job count in the listing and `/runs/{id}/jobs` costs one
 request per run, which at this organisation's volume (§6.6) is
 impossible. GSR already proves the alternative: GraphQL `nodes(ids:)`
 over `WorkflowRun` with
-`checkSuite { checkRuns(filterBy: {checkType: ALL}) { totalCount } }`,
-fifty runs per query at a cost of one point. Every job execution counts,
-re-run attempts included, and the count attaches to the run's creation
-day. `jobs` stays `NULL` until read, and the coverage table marks the
+`checkSuite { checkRuns(filterBy: {checkType: LATEST}) { totalCount } }`,
+fifty runs per query at a cost of one point. The count is the jobs of
+the run's latest attempt: what a person sees on the run page, and what
+the REST jobs listing returns. `ALL` counts every job again for every
+attempt, those carried over without running included. A 14-job run
+re-run twice with "re-run failed jobs" executed 16 jobs; `ALL` counted
+42 and `LATEST` 14 (measured 2026-11-16). `LATEST` is stable and
+understates re-run work a little. The count attaches to the run's
+creation day.
+
+`enrich_jobs` (`collect/jobs.py`) reads every run of the repositories in
+scope with a conclusion and no count, newest first, so the most recent
+days complete first and a cold start fills in backwards; a run still in
+progress waits until the runs collector sees it conclude. A repository
+out of scope keeps its stored runs but is not read, since the token of
+§9.2 may no longer reach it. A run GitHub no longer finds, or one
+without a check suite, stores `0` so the collector never reads it
+again; the collector logs an id that fails alone and reads it again on
+the next run. The store clears a run's count when its status,
+conclusion or attempt changes, so the collector counts a re-run again.
+The budget and its last point work as in §6.3, and a budget that
+counts no run logs a warning naming `budget.graphql_points`. A batch
+that fails, a `502` included, halves (§6.5); a transport error ends
+the step, keeping the counts stored. The query needs `checks: read`
+(§9.2): a `FORBIDDEN` check suite logs one warning naming that
+permission and ends the step, leaving `jobs` null, so the rest of the
+run completes.
+
+`jobs` stays `NULL` until read, and the coverage table marks the
 jobs metric incomplete for that day until every run of the day has a
-count: storing a run without one removes its day from `jobs` coverage,
-and the collector adds the day back once it holds every count.
+count: storing a run without one removes its day from `jobs` coverage.
+At the end of every step, finished or stopped, `enrich_jobs` sets each
+repository's `jobs` coverage to its `runs` coverage less the days that
+hold a run without a count: a day gains it back once every run of the
+day has a count, and a day in `runs` coverage with no runs gains it too.
 
 The "CI" chart's two rows are **workflow runs** and **jobs**;
 jobs never fall below runs, so this pair never swaps. A fourth, optional
@@ -918,7 +946,7 @@ From GSR's ADR-0007 measurements (2026-10-15, 143 active repositories):
 | Cold: items, 365 days           | low hundreds of REST pages                 | volume unknown; measured in the spike     |
 | Cold: reviews for a year of PRs | 1 to 2 GraphQL points per 50 items         | some hundreds of points for 23,000 items  |
 | Cold: runs, 365 days (~520k)    | ~5,500 REST pages, ~6.5 GB transfer        | two or three runs at a 3,000 budget       |
-| Cold: job counts for ~520k runs | ~10,400 GraphQL points                     | 5,000 points per hour; three or four runs |
+| Cold: job counts for ~520k runs | ~10,400 GraphQL points                     | ~7 runs at the default 1,500 points       |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1407,9 +1435,11 @@ so.
   The CI window cannot exceed that horizon, and the store becomes the
   sole source of older days, which raises the value of the artifact
   fallback.
-- `checkRuns(filterBy: {checkType: ALL}).totalCount` versus `LATEST`:
-  which one matches the intuition "jobs that ran today" for re-runs,
-  and that the restricted token of §9.2 can run the query.
+- `checkRuns(filterBy: {checkType: ...}).totalCount`: `LATEST`, not
+  `ALL` (measured 2026-11-16). `ALL` counts every job again for every
+  attempt, so it tripled a run re-run twice; `LATEST` matches the run
+  page and understates re-run work a little (§6.4). Still to
+  confirm: that the restricted token of §9.2 can run the query.
 - The volume of issues and pull requests over 365 days for
   `lfreleng-actions`, to size the items backfill (expected to be small
   next to runs).
