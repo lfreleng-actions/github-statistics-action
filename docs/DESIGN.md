@@ -732,7 +732,15 @@ exceeds the cap halves in whole days, then splits into hours, read
 newest first; `oldest` advances after each part, hours included, and
 to the second above the oldest run read when the budget runs out
 between pages. The whole days read gain coverage, so a sync that runs
-out of budget mid-slice resumes below it. The `created=` slice reader
+out of budget mid-slice resumes below it. A resumed read, here or in a
+hole's fill, reads the second it stopped in again from its first page,
+so if more runs share that second than the budget pages through on
+every sync, no sync passes them. That needs over a hundred runs created
+in one second; rather than keep a page cursor in the store, the
+collector accepts the limit and makes it visible: a read that the
+budget stops inside the second it started from logs a warning naming
+the repository and that second, and sets `stalled` on the sync result
+for the run summary. The `created=` slice reader
 lives in `collect/reader.py`. The collector reads an hour still over the
 cap up to the cap and adds no coverage for its day. The `runs_gap` sync
 state keeps the end of the newest such hour as its watermark, so no

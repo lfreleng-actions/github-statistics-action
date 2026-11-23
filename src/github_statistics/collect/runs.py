@@ -57,6 +57,8 @@ class RunSyncResult:
     ``current``: the incremental read finished. ``reached``: history
     reaches the window start or the listing horizon. ``unreadable``: the
     HTTP status that made the repository unreadable, else ``None``.
+    ``stalled``: a spent budget stopped a read inside the second it
+    started from (`SliceReader.read`).
     """
 
     repo: str
@@ -65,6 +67,7 @@ class RunSyncResult:
     current: bool
     reached: bool
     unreadable: int | None = None
+    stalled: bool = False
 
 
 class _RunSync(SliceReader):
@@ -95,7 +98,13 @@ class _RunSync(SliceReader):
         oldest = self.state.oldest
         reached = oldest is not None and oldest <= self.target
         return RunSyncResult(
-            self.key, self.runs, self.pages, self.current, reached, self.unreadable
+            self.key,
+            self.runs,
+            self.pages,
+            self.current,
+            reached,
+            self.unreadable,
+            self.stalled,
         )
 
     async def guarded(self, phase: Callable[[], Awaitable[None]]) -> bool:

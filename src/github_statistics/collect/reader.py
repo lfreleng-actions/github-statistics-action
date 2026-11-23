@@ -6,6 +6,14 @@ The run sync's incremental read and backfill read through it, and the
 weekly sweep (#51) can too. The ``runs_gap`` sync state's ``watermark``
 holds the end of the newest range read only up to the listing cap, and
 its ``oldest`` the start of the oldest such range.
+
+A read the budget stops between pages resumes from the second above the
+oldest run read. If more runs share that second than the budget can page
+through, every sync re-reads the same pages and never passes them. That
+needs over a hundred runs created in one second and a budget that runs
+out among their pages on every sync. The collector accepts that as a
+limit (#57) rather than keep a page cursor for the second in the store:
+such a read logs a warning and sets ``stalled``.
 """
 
 from __future__ import annotations
@@ -46,6 +54,7 @@ class SliceReader:
         self.gap_low = None if gap is None else gap.oldest
         self.runs = 0
         self.pages = 0
+        self.stalled = False
 
     async def read(
         self, low: datetime, high: datetime, checkpoint: Checkpoint
@@ -56,7 +65,9 @@ class SliceReader:
         first; an hour still over it is read up to the cap and is
         incomplete. ``checkpoint`` gets each part once read and, when a
         spent budget stops the paging, the second above the oldest run
-        read: runs sharing that second may lie on the unread page.
+        read: runs sharing that second may lie on the unread page. When
+        that is no earlier than the second above ``high``, the read made
+        no progress and is ``stalled``.
         """
         created = f"{timestamp(low)}..{timestamp(high)}"
         params = {"per_page": PER_PAGE, "created": created}
@@ -85,6 +96,14 @@ class SliceReader:
                 bottom = min((run.created_at for run in runs), default=bottom)
         except BudgetExhaustedError:
             if bottom is not None:
+                if bottom >= high:
+                    log.warning(
+                        "budget spent within runs of %s created at %s; "
+                        "the next sync re-reads them",
+                        self.key,
+                        timestamp(high),
+                    )
+                    self.stalled = True
                 checkpoint(bottom + SECOND, True)
             raise
         if not pieces:

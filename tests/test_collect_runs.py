@@ -605,7 +605,6 @@ async def test_spent_budget_between_pages_of_a_slice_resumes_below_them() -> Non
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_read_the_budget_stops_within_one_second_is_stalled(
     caplog: pytest.LogCaptureFixture,
