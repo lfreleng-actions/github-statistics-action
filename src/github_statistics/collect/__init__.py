@@ -12,12 +12,18 @@ from .items import (
     sync_all_items,
     sync_items,
 )
+from .runs import RUNS_METRIC, RunSyncResult, runs_horizon, sync_all_runs, sync_runs
 
 __all__ = [
     "ISSUES_METRIC",
     "ITEMS_METRIC",
     "PULL_REQUESTS_METRIC",
+    "RUNS_METRIC",
     "ItemSyncResult",
+    "RunSyncResult",
+    "runs_horizon",
     "sync_all_items",
+    "sync_all_runs",
     "sync_items",
+    "sync_runs",
 ]

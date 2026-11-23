@@ -320,7 +320,6 @@ def test_store_item_page_writes_items_and_watermark_together() -> None:
         assert store.sync_state("acme/a", "items") == state
 
 
-@pytest.mark.xfail(strict=True)
 def test_store_run_page_writes_runs_and_state_together() -> None:
     """Runs and their sync state commit together, or neither does."""
     from github_statistics.store import SyncState
@@ -339,7 +338,6 @@ def test_store_run_page_writes_runs_and_state_together() -> None:
         assert store.sync_state("acme/a", "runs") == state
 
 
-@pytest.mark.xfail(strict=True)
 def test_earliest_run_day_is_per_owner() -> None:
     """The oldest run day of an owner's repositories, owner compared without case."""
     with _store() as store:

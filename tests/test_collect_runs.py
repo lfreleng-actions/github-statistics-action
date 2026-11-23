@@ -154,7 +154,6 @@ def _midnight(day: date) -> datetime:
     return datetime(day.year, day.month, day.day, tzinfo=UTC)
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_unchanged_listing_answers_304_and_extends_coverage() -> None:
     actions = _Actions([_listed(1, _at(5))])
@@ -171,7 +170,6 @@ async def test_unchanged_listing_answers_304_and_extends_coverage() -> None:
         assert _state(store).last_sync_at == NOW
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_incremental_read_stops_at_the_watermark() -> None:
     old = [_listed(i, _at(2) + timedelta(minutes=i)) for i in range(1, 151)]
@@ -192,7 +190,6 @@ async def test_incremental_read_stops_at_the_watermark() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_incremental_read_pages_past_runs_sharing_the_boundary() -> None:
     runs = [_listed(0, _at(9))]
@@ -206,7 +203,6 @@ async def test_incremental_read_pages_past_runs_sharing_the_boundary() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_listing_cap_falls_back_to_a_date_slice() -> None:
     watermark = _at(1)
@@ -224,7 +220,6 @@ async def test_listing_cap_falls_back_to_a_date_slice() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_first_sync_of_a_busy_repository_backfills_below_the_cap() -> None:
     runs = [_listed(i, _at(2) + timedelta(minutes=3 * i)) for i in range(1, 1201)]
@@ -239,7 +234,6 @@ async def test_first_sync_of_a_busy_repository_backfills_below_the_cap() -> None
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_slices_halve_to_a_day_and_split_the_day_by_hours() -> None:
     runs = [_listed(0, _at(9))]
@@ -269,7 +263,6 @@ async def test_slices_halve_to_a_day_and_split_the_day_by_hours() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_an_hour_over_the_cap_leaves_its_day_uncovered() -> None:
     runs = [_listed(0, _at(9))]
@@ -289,7 +282,6 @@ async def test_an_hour_over_the_cap_leaves_its_day_uncovered() -> None:
         ]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_day_left_incomplete_stays_uncovered_on_the_next_sync() -> None:
     _Actions([_listed(i, _at(9, 10) + timedelta(seconds=i)) for i in range(1, 2101)])
@@ -305,7 +297,6 @@ async def test_a_day_left_incomplete_stays_uncovered_on_the_next_sync() -> None:
         assert _coverage(store) == [(date(2026, 3, 3), date(2026, 3, 8))]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_an_incremental_hour_over_the_cap_covers_the_days_after_it() -> None:
     runs = [_listed(i, _at(4, 10) + timedelta(seconds=i)) for i in range(1, 2101)]
@@ -327,7 +318,6 @@ async def test_an_incremental_hour_over_the_cap_covers_the_days_after_it() -> No
         assert _coverage(store) == [(WINDOW, WINDOW), (date(2026, 3, 5), YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_backfill_leaves_a_day_an_incremental_hour_left_incomplete() -> None:
     runs = [_listed(0, _at(3))]
@@ -346,7 +336,6 @@ async def test_backfill_leaves_a_day_an_incremental_hour_left_incomplete() -> No
         ]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_keeps_complete_slices_and_resumes_from_oldest() -> None:
     from github_statistics.client import Budget
@@ -378,7 +367,6 @@ async def test_spent_budget_keeps_complete_slices_and_resumes_from_oldest() -> N
         assert _coverage(store) == [(date(2026, 2, 15), YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_keeps_each_whole_day_part_of_a_split_slice() -> None:
     from github_statistics.client import Budget
@@ -405,7 +393,6 @@ async def test_spent_budget_keeps_each_whole_day_part_of_a_split_slice() -> None
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_after_an_empty_slice_resumes_below_it() -> None:
     from github_statistics.client import Budget
@@ -428,7 +415,6 @@ async def test_spent_budget_after_an_empty_slice_resumes_below_it() -> None:
         assert _coverage(store) == [(date(2026, 3, 8), YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_keeps_each_hour_of_a_split_day() -> None:
     from github_statistics.client import Budget
@@ -455,7 +441,6 @@ async def test_spent_budget_keeps_each_hour_of_a_split_day() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_resumed_day_is_covered_when_the_backfill_reaches_the_horizon() -> None:
     from github_statistics.client import Budget
@@ -484,7 +469,6 @@ async def test_a_resumed_day_is_covered_when_the_backfill_reaches_the_horizon() 
         assert _coverage(store) == [(date(2026, 3, 7), YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_an_hour_over_the_cap_keeps_its_day_uncovered_after_a_resume() -> None:
     from github_statistics.client import Budget
@@ -510,7 +494,6 @@ async def test_an_hour_over_the_cap_keeps_its_day_uncovered_after_a_resume() -> 
         ]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_on_a_first_sync_keeps_the_pages_read() -> None:
     from github_statistics.client import Budget
@@ -535,7 +518,6 @@ async def test_spent_budget_on_a_first_sync_keeps_the_pages_read() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_while_paging_past_a_watermark_resumes_below() -> None:
     from github_statistics.client import Budget
@@ -561,7 +543,6 @@ async def test_spent_budget_while_paging_past_a_watermark_resumes_below() -> Non
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_after_filling_a_hole_keeps_its_start() -> None:
     from github_statistics.client import Budget
@@ -586,7 +567,6 @@ async def test_spent_budget_after_filling_a_hole_keeps_its_start() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_spent_budget_between_pages_of_a_slice_resumes_below_them() -> None:
     from github_statistics.client import Budget
@@ -611,7 +591,6 @@ async def test_spent_budget_between_pages_of_a_slice_resumes_below_them() -> Non
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_empty_slices_above_a_held_run_do_not_end_the_backfill() -> None:
     from github_statistics.store import Run
@@ -653,7 +632,6 @@ async def test_empty_slices_above_a_held_run_do_not_end_the_backfill() -> None:
         assert _coverage(store) == [(date(2026, 2, 8), YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_backfill_ends_at_the_listing_horizon() -> None:
     window = date(2026, 1, 1)
@@ -683,7 +661,6 @@ async def test_backfill_ends_at_the_listing_horizon() -> None:
         assert len(actions.created) == 5
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_pending_runs_are_reread_up_to_fifty() -> None:
     from github_statistics.store import Run
@@ -721,7 +698,6 @@ async def test_pending_runs_are_reread_up_to_fifty() -> None:
         assert [run.id for run in store.pending_runs("acme/a")] == list(range(51, 61))
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_unreadable_pending_reread_adds_no_coverage() -> None:
     from github_statistics.store import Run
@@ -759,7 +735,6 @@ async def test_unreadable_pending_reread_adds_no_coverage() -> None:
         assert _ids(store) == {1, 2}
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_runs_listed_in_progress_wait_for_the_next_sync() -> None:
     actions = _Actions([_listed(1, _at(9), status="in_progress", conclusion=None)])
@@ -770,7 +745,6 @@ async def test_runs_listed_in_progress_wait_for_the_next_sync() -> None:
         assert [run.id for run in store.pending_runs("acme/a")] == [1]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_actor_comes_from_triggering_actor_falling_back_to_actor() -> None:
     bot = {"login": "dependabot[bot]", "type": "Bot"}
@@ -797,7 +771,6 @@ async def test_actor_comes_from_triggering_actor_falling_back_to_actor() -> None
         )
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_actions_disabled_covers_the_window_with_no_runs() -> None:
     _Actions([])
@@ -808,7 +781,6 @@ async def test_actions_disabled_covers_the_window_with_no_runs() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize("status", [403, 404])
 @respx.mock
 async def test_unreadable_repository_keeps_coverage_and_spares_the_others(
@@ -843,7 +815,6 @@ async def test_unreadable_repository_keeps_coverage_and_spares_the_others(
         assert _coverage(store, "acme/ok") == [(WINDOW, YESTERDAY)]
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_every_incremental_read_comes_before_any_backfill() -> None:
     from github_statistics.client import Transport

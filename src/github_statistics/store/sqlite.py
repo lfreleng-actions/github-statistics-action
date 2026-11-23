@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from . import codec
 from .activity import ActivityStore
 from .base import assignments, chunks, marks
-from .models import DayRange, Item, Member, SyncState
+from .models import DayRange, Item, Member, Run, SyncState
 from .schema import REPOSITORY_TABLES, TABLES
 
 _UPSERT_SYNC = (
@@ -96,6 +96,16 @@ class Store(ActivityStore):
                 " WHERE repo = ? AND number = ? AND reviews_read_at = updated_at",
                 ((item.repo, item.number) for item in page),
             )
+            self.set_sync_state(state)
+
+    def store_run_page(self, runs: Iterable[Run], state: SyncState) -> None:
+        """Upsert ``runs`` and store ``state`` in one transaction.
+
+        The watermark in ``state`` then never runs ahead of the runs it
+        describes, nor falls behind them (design §6.5).
+        """
+        with self._transaction():
+            self.upsert_runs(runs)
             self.set_sync_state(state)
 
     def restart_item_sync(

@@ -209,6 +209,20 @@ class ActivityStore(StoreBase):
         rows = self._select_in(sql, (low, high), "repo", repos, "created_at, id")
         return [codec.run_from_row(row) for row in rows]
 
+    def earliest_run_day(self, owner: str) -> date | None:
+        """The creation day of the oldest run held for any repository of ``owner``.
+
+        Owners compare without case, as GitHub's do; ``None`` when no run
+        of ``owner`` is held.
+        """
+        escaped = owner.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        row = self._connection.execute(
+            "SELECT MIN(substr(created_at, 1, 10)) FROM runs"
+            " WHERE repo LIKE ? ESCAPE '\\'",
+            (f"{escaped}/%",),
+        ).fetchone()
+        return None if row[0] is None else codec.parse_day(row[0])
+
 
 def _uncover(connection: sqlite3.Connection, repo: str, metric: str, day: str) -> None:
     """Take ``day`` out of the coverage of ``metric``, splitting its range."""
