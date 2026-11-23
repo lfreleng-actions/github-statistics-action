@@ -933,7 +933,6 @@ def _store_run(store: Any, run: dict[str, Any], jobs: int) -> None:
     store.set_job_counts({run["id"]: jobs})
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_sweep_is_not_due_within_seven_days() -> None:
     _Actions([_listed(1, _at(5))])
@@ -948,7 +947,6 @@ async def test_a_sweep_is_not_due_within_seven_days() -> None:
         assert _state(store).swept_to == swept_to
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize(
     ("swept_to", "created"),
     [
@@ -976,7 +974,6 @@ async def test_a_sweep_reads_from_thirty_days_before_the_last(
         assert _coverage(store) == [(WINDOW, date(2026, 3, 5))]
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize("swept_to", [_at(2, 6), _at(23, 6, month=2)])
 @respx.mock
 async def test_a_sweep_finds_a_rerun_and_clears_its_job_count(
@@ -995,7 +992,6 @@ async def test_a_sweep_finds_a_rerun_and_clears_its_job_count(
         assert (run.attempt, run.jobs) == (2, None)
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_sweep_the_budget_cuts_short_resumes_next_run() -> None:
     from github_statistics.client import Budget
@@ -1019,7 +1015,6 @@ async def test_a_sweep_the_budget_cuts_short_resumes_next_run() -> None:
         assert _state(store).swept_to == NOW
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_sweep_of_an_unreadable_repository_leaves_swept_to() -> None:
     respx.get(f"{API}/repos/acme/a/actions/runs").respond(404)
@@ -1033,7 +1028,6 @@ async def test_a_sweep_of_an_unreadable_repository_leaves_swept_to() -> None:
         assert _state(store).swept_to == swept_to
 
 
-@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_sweep_moves_swept_to_past_an_hour_over_the_cap() -> None:
     _Actions(

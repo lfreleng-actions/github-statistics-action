@@ -14,6 +14,7 @@ The ``runs_hole`` state holds a range an incremental read left unread
 below the runs it stored, from ``oldest`` to ``watermark``; the next
 read fills it first, and covers its days only once it is filled; the
 state is cleared once they are covered.
+The ``runs`` state's ``swept_to`` holds when a re-run sweep last ended.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 
@@ -48,6 +49,9 @@ RUNS_METRIC = "runs"
 HOLE_METRIC = "runs_hole"
 PENDING_LIMIT = 50
 SLICE_DAYS = 7
+# GitHub allows a re-run for 30 days after the first run.
+RERUN_DAYS = timedelta(days=30)
+SWEEP_EVERY = timedelta(days=7)
 
 
 @dataclass(frozen=True)
@@ -182,6 +186,18 @@ class _RunSync(SliceReader):
                 low = max(self.target, min(low, after))
             self._checkpoint(low, complete)
             cursor = low
+
+    async def sweep(self) -> None:
+        """Re-read the runs a re-run may have changed (`sweep_runs`).
+
+        Records no checkpoint, so ``oldest``, the watermark and coverage
+        stay as they were; ``swept_to`` moves to now once the read ends.
+        An hour over the listing cap does not hold it: no later read can
+        list more of that hour, and ``runs_gap`` records it already.
+        """
+        since = self.state.swept_to or self.now - SWEEP_EVERY
+        await self.read(since - RERUN_DAYS, self.now, lambda _low, _done: None)
+        self._save(dataclasses.replace(self.state, swept_to=self.now))
 
     async def _older(self, below: datetime) -> datetime | None:
         """When the newest run listed as created before ``below`` was, if any."""
