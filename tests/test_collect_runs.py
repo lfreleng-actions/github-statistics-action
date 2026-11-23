@@ -63,15 +63,17 @@ def _listed(
 class _Actions:
     """A fake Actions API for ``acme/<repo>`` with the listing's caps.
 
-    The listing serves ``runs`` newest first, 100 a page, stops after
-    1,000 items and filters by a ``created=A..B`` range of timestamps.
-    The unfiltered first page answers ``304`` to ``etag``.
+    The listing serves ``runs`` newest first, ``per_page`` a page, stops
+    after 1,000 items and filters by a ``created=A..B`` range of
+    timestamps, recorded in ``created``, or by ``created=<A``, recorded
+    in ``probes``. The unfiltered first page answers ``304`` to ``etag``.
     """
 
     def __init__(self, runs: list[dict[str, Any]], repo: str = "a") -> None:
         self.runs = {run["id"]: run for run in runs}
         self.listing = f"{API}/repos/acme/{repo}/actions/runs"
         self.created: list[str] = []
+        self.probes: list[str] = []
         respx.get(self.listing).mock(side_effect=self._list)
         self.reread = respx.get(url__regex=rf"{self.listing}/\d+$").mock(
             side_effect=self._one
@@ -80,6 +82,7 @@ class _Actions:
     def _list(self, request: httpx.Request) -> httpx.Response:
         params = request.url.params
         page = int(params.get("page", "1"))
+        size = int(params.get("per_page", "30"))
         selected = sorted(
             self.runs.values(), key=lambda run: (run["created_at"], run["id"])
         )[::-1]
@@ -87,15 +90,18 @@ class _Actions:
         if created is None:
             if page == 1 and request.headers.get("if-none-match") == ETAG:
                 return httpx.Response(304)
+        elif created.startswith("<"):
+            self.probes.append(created)
+            selected = [r for r in selected if r["created_at"] < created[1:]]
         else:
             if page == 1:
                 self.created.append(created)
             low, high = created.split("..")
             selected = [r for r in selected if low <= r["created_at"] <= high]
         visible = selected[:1000]
-        chunk = visible[(page - 1) * 100 : page * 100]
+        chunk = visible[(page - 1) * size : page * size]
         headers = {"etag": ETAG}
-        if page * 100 < len(visible):
+        if page * size < len(visible):
             following = request.url.copy_merge_params({"page": page + 1})
             headers["link"] = f'<{following}>; rel="next"'
         body = {"total_count": min(len(selected), 2500), "workflow_runs": chunk}
@@ -393,26 +399,36 @@ async def test_spent_budget_keeps_each_whole_day_part_of_a_split_slice() -> None
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
+@pytest.mark.xfail(strict=True)
 @respx.mock
-async def test_spent_budget_after_an_empty_slice_resumes_below_it() -> None:
+async def test_a_probe_cut_short_by_the_budget_marks_nothing_read() -> None:
     from github_statistics.client import Budget
 
     window = date(2026, 2, 1)
-    actions = _Actions([_listed(0, _at(9))])
+    actions = _Actions([_listed(0, _at(9)), _listed(1, _at(10, month=2))])
     with _store() as store:
         _seed(store, watermark=_at(9), etag=ETAG, oldest=_midnight(date(2026, 3, 8)))
         store.add_coverage("acme/a", "runs", date(2026, 3, 8), YESTERDAY)
 
         cut = await _sync(store, budget=Budget(rest=2), window=window)
-        resumed = await _sync(store, budget=Budget(rest=2), window=window)
 
-        assert (cut.reached, resumed.reached) == (False, True)
-        assert actions.created == [
-            "2026-03-01T00:00:00Z..2026-03-07T23:59:59Z",
-            "2026-02-22T00:00:00Z..2026-02-28T23:59:59Z",
-        ]
-        assert _state(store).oldest == _midnight(window)
+        assert cut.reached is False
+        assert actions.created == ["2026-03-01T00:00:00Z..2026-03-07T23:59:59Z"]
+        assert actions.probes == []
+        assert _state(store).oldest == _midnight(date(2026, 3, 8))
         assert _coverage(store) == [(date(2026, 3, 8), YESTERDAY)]
+
+        resumed = await _sync(store, window=window)
+
+        assert resumed.reached is True
+        assert actions.created[1:] == [
+            "2026-03-01T00:00:00Z..2026-03-07T23:59:59Z",
+            "2026-02-04T00:00:00Z..2026-02-10T23:59:59Z",
+            "2026-02-01T00:00:00Z..2026-02-03T23:59:59Z",
+        ]
+        assert actions.probes == ["<2026-03-01T00:00:00Z", "<2026-02-01T00:00:00Z"]
+        assert _ids(store) == {1}
+        assert _coverage(store) == [(date(2026, 2, 4), YESTERDAY)]
 
 
 @respx.mock
@@ -441,6 +457,7 @@ async def test_spent_budget_keeps_each_hour_of_a_split_day() -> None:
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
+@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_a_resumed_day_is_covered_when_the_backfill_reaches_the_horizon() -> None:
     from github_statistics.client import Budget
@@ -462,10 +479,8 @@ async def test_a_resumed_day_is_covered_when_the_backfill_reaches_the_horizon() 
         resumed = await _sync(store, window=window)
 
         assert resumed.reached is True
-        assert actions.created[cut:] == [
-            "2026-03-01T00:00:00Z..2026-03-07T12:59:59Z",
-            "2026-02-22T00:00:00Z..2026-02-28T23:59:59Z",
-        ]
+        assert actions.created[cut:] == ["2026-03-01T00:00:00Z..2026-03-07T12:59:59Z"]
+        assert actions.probes == ["<2026-03-01T00:00:00Z"]
         assert _coverage(store) == [(date(2026, 3, 7), YESTERDAY)]
 
 
@@ -591,47 +606,46 @@ async def test_spent_budget_between_pages_of_a_slice_resumes_below_them() -> Non
         assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
+@pytest.mark.xfail(strict=True)
 @respx.mock
-async def test_empty_slices_above_a_held_run_do_not_end_the_backfill() -> None:
-    from github_statistics.store import Run
-
-    window = date(2026, 2, 1)
-    held = _at(10, month=2)
-    actions = _Actions([_listed(0, _at(9)), _listed(1, held)])
+async def test_a_quiet_gap_is_probed_across_and_covered() -> None:
+    window = date(2026, 1, 14)
+    runs = [_listed(0, _at(9)), _listed(1, _at(5)), _listed(2, _at(20, month=1))]
+    actions = _Actions(runs)
     with _store() as store:
-        store.upsert_runs(
-            [
-                Run(
-                    id=1,
-                    node_id="WFR_1",
-                    repo="acme/a",
-                    workflow_path=".github/workflows/ci.yaml",
-                    event="push",
-                    status="completed",
-                    conclusion="success",
-                    created_at=held,
-                    actor="alice",
-                    actor_type="User",
-                    attempt=1,
-                )
-            ]
-        )
         _seed(store, watermark=_at(9), etag=ETAG, oldest=_midnight(date(2026, 3, 8)))
         store.add_coverage("acme/a", "runs", date(2026, 3, 8), YESTERDAY)
 
         result = await _sync(store, window=window)
 
-        assert result.reached is True
+        assert (result.reached, result.pages) == (True, 5)
         assert actions.created == [
             "2026-03-01T00:00:00Z..2026-03-07T23:59:59Z",
             "2026-02-22T00:00:00Z..2026-02-28T23:59:59Z",
-            "2026-02-15T00:00:00Z..2026-02-21T23:59:59Z",
-            "2026-02-08T00:00:00Z..2026-02-14T23:59:59Z",
-            "2026-02-01T00:00:00Z..2026-02-07T23:59:59Z",
+            "2026-01-14T00:00:00Z..2026-01-20T23:59:59Z",
         ]
-        assert _coverage(store) == [(date(2026, 2, 8), YESTERDAY)]
+        assert actions.probes == ["<2026-02-22T00:00:00Z"]
+        assert _ids(store) == {1, 2}
+        assert _coverage(store) == [(window, YESTERDAY)]
 
 
+@pytest.mark.xfail(strict=True)
+@respx.mock
+async def test_an_empty_window_start_is_covered_when_older_runs_are_listed() -> None:
+    actions = _Actions([_listed(0, _at(9)), _listed(1, _at(20, month=2))])
+    with _store() as store:
+        _seed(store, watermark=_at(9), etag=ETAG, oldest=_midnight(date(2026, 3, 8)))
+        store.add_coverage("acme/a", "runs", date(2026, 3, 8), YESTERDAY)
+
+        result = await _sync(store)
+
+        assert result.reached is True
+        assert actions.probes == ["<2026-03-01T00:00:00Z"]
+        assert _ids(store) == set()
+        assert _coverage(store) == [(WINDOW, YESTERDAY)]
+
+
+@pytest.mark.xfail(strict=True)
 @respx.mock
 async def test_backfill_ends_at_the_listing_horizon() -> None:
     window = date(2026, 1, 1)
@@ -646,19 +660,30 @@ async def test_backfill_ends_at_the_listing_horizon() -> None:
         assert actions.created == [
             "2026-03-01T00:00:00Z..2026-03-07T23:59:59Z",
             "2026-02-22T00:00:00Z..2026-02-28T23:59:59Z",
-            "2026-02-15T00:00:00Z..2026-02-21T23:59:59Z",
-            "2026-02-08T00:00:00Z..2026-02-14T23:59:59Z",
-            "2026-02-01T00:00:00Z..2026-02-07T23:59:59Z",
+            "2026-02-12T00:00:00Z..2026-02-18T23:59:59Z",
+            "2026-02-05T00:00:00Z..2026-02-11T23:59:59Z",
         ]
+        assert actions.probes == ["<2026-02-22T00:00:00Z", "<2026-02-05T00:00:00Z"]
         assert result.reached is True
         assert _state(store).oldest == _midnight(window)
-        assert _coverage(store) == [(date(2026, 2, 15), YESTERDAY)]
+        assert _coverage(store) == [(date(2026, 2, 12), YESTERDAY)]
         assert _api().runs_horizon(store, "acme") == date(2026, 2, 18)
 
         again = await _sync(store, window=window)
 
         assert again.pages == 1
-        assert len(actions.created) == 5
+        assert (len(actions.created), len(actions.probes)) == (4, 2)
+
+
+@respx.mock
+async def test_a_repository_with_no_runs_probes_nothing() -> None:
+    actions = _Actions([])
+    with _store() as store:
+        result = await _sync(store)
+
+        assert (result.pages, result.reached) == (1, True)
+        assert (actions.created, actions.probes) == ([], [])
+        assert _coverage(store) == [(WINDOW, YESTERDAY)]
 
 
 @respx.mock
