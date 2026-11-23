@@ -14,10 +14,6 @@ The ``runs_hole`` state holds a range an incremental read left unread
 below the runs it stored, from ``oldest`` to ``watermark``; the next
 read fills it first, and covers its days only once it is filled; the
 state is cleared once they are covered.
-The ``runs_backfill`` state's ``oldest`` holds how far below ``oldest``
-the backfill read empty slices, which it resumes from; its ``watermark``
-holds the start of the oldest part the backfill read only up to the cap,
-whose day it never covers.
 """
 
 from __future__ import annotations
@@ -43,17 +39,15 @@ from github_statistics.store import Run, Store, SyncState
 from .common import run_concurrently, scope_keys, unreadable_status
 from .listed import listed_run, reaches
 from .reader import PER_PAGE, RUNS_KEY, SliceReader
-from .slices import DAY, SECOND, first_full_day, midnight, slice_below
+from .slices import DAY, SECOND, first_full_day, midnight, slice_below, timestamp
 
 log = logging.getLogger(__name__)
 
 # The sync state and coverage metric of the listing.
 RUNS_METRIC = "runs"
 HOLE_METRIC = "runs_hole"
-BACKFILL_METRIC = "runs_backfill"
 PENDING_LIMIT = 50
 SLICE_DAYS = 7
-HORIZON_EMPTIES = 2
 
 
 @dataclass(frozen=True)
@@ -63,6 +57,8 @@ class RunSyncResult:
     ``current``: the incremental read finished. ``reached``: history
     reaches the window start or the listing horizon. ``unreadable``: the
     HTTP status that made the repository unreadable, else ``None``.
+    ``stalled``: a spent budget stopped a read inside the second it
+    started from (`SliceReader.read`).
     """
 
     repo: str
@@ -71,6 +67,7 @@ class RunSyncResult:
     current: bool
     reached: bool
     unreadable: int | None = None
+    stalled: bool = False
 
 
 class _RunSync(SliceReader):
@@ -93,8 +90,6 @@ class _RunSync(SliceReader):
         self.yesterday = now.astimezone(UTC).date() - DAY
         self.state = store.sync_state(key, RUNS_METRIC) or SyncState(key, RUNS_METRIC)
         self.hole = store.sync_state(key, HOLE_METRIC)
-        progress = store.sync_state(key, BACKFILL_METRIC)
-        self.progress = progress or SyncState(key, BACKFILL_METRIC)
         self.current = False
         self.unreadable: int | None = None
 
@@ -103,7 +98,13 @@ class _RunSync(SliceReader):
         oldest = self.state.oldest
         reached = oldest is not None and oldest <= self.target
         return RunSyncResult(
-            self.key, self.runs, self.pages, self.current, reached, self.unreadable
+            self.key,
+            self.runs,
+            self.pages,
+            self.current,
+            reached,
+            self.unreadable,
+            self.stalled,
         )
 
     async def guarded(self, phase: Callable[[], Awaitable[None]]) -> bool:
@@ -158,60 +159,51 @@ class _RunSync(SliceReader):
     async def backfill(self) -> None:
         """Read week slices below ``oldest``, newest first, to the window start.
 
-        An empty slice may lie past the listing horizon: it is covered
-        only once a run is found below it, though the day of an intra-day
-        ``oldest`` it completes is covered at once. The `BACKFILL_METRIC`
-        state keeps how far the empty slices reached. Two in a row older
-        than every run held, or empties down to the window start, end the
-        backfill at the listing horizon. A split slice checkpoints after
+        An empty slice is followed by one probe for the newest run listed
+        below it (`_older`). The days between are empty: they gain
+        coverage, and the backfill goes on from the slice ending on that
+        run's day. With nothing older listed, the backfill ends at the
+        listing horizon, covering none of the slice's days but that of an
+        intra-day ``oldest`` it completes. A split slice checkpoints after
         each part (`_checkpoint`).
         """
         cursor = self.state.oldest
-        if cursor is None:
-            return
-        held = self._oldest_held(cursor)
-        empties = 0
-        resume = self.progress.oldest
-        while resume is not None and resume < cursor and cursor > self.target:
-            empties += held is None or cursor <= held
-            cursor = slice_below(cursor, self.target, SLICE_DAYS)
-        while cursor > self.target and empties < HORIZON_EMPTIES:
+        while cursor is not None and cursor > self.target:
             low = slice_below(cursor, self.target, SLICE_DAYS)
             read, complete = await self.read(low, cursor - SECOND, self._checkpoint)
             if read == 0:
-                empties += held is None or cursor <= held
-                self._progress(dataclasses.replace(self.progress, oldest=low))
-                if cursor == self.state.oldest:
+                older = await self._older(low)
+                if older is None:
+                    log.info("no runs of %s listed before %s", self.key, low)
                     self._cover_read(cursor.astimezone(UTC).date())
-            else:
-                empties = 0
-                self._checkpoint(low, complete)
+                    self._save(dataclasses.replace(self.state, oldest=self.target))
+                    return
+                after = midnight(older.astimezone(UTC).date()) + DAY
+                low = max(self.target, min(low, after))
+            self._checkpoint(low, complete)
             cursor = low
-        if self.state.oldest is not None and self.state.oldest > self.target:
-            log.info("no runs of %s listed before %s", self.key, self.state.oldest)
-            self._save(dataclasses.replace(self.state, oldest=self.target))
 
-    def _oldest_held(self, cursor: datetime) -> datetime | None:
-        """When the oldest run held in the window below ``cursor`` was created."""
-        runs = self.store.runs_between(
-            self.window_start, (cursor - SECOND).date(), [self.key]
-        )
-        return next((run.created_at for run in runs if run.created_at < cursor), None)
+    async def _older(self, below: datetime) -> datetime | None:
+        """When the newest run listed as created before ``below`` was, if any."""
+        params = {"per_page": 1, "created": f"<{timestamp(below)}"}
+        response = await self.transport.request("GET", self.path, params=params)
+        self.pages += 1
+        response.raise_for_status()
+        listed = response.json()[RUNS_KEY]
+        if not listed:
+            return None
+        return datetime.fromisoformat(listed[0]["created_at"])
 
     def _checkpoint(self, low: datetime, complete: bool) -> None:
         """Record that every run from ``low`` up to ``oldest`` is read.
 
-        If ``complete``, cover the whole days read, with any empty slices
-        above, short of the day of a part read only up to the cap, by the
-        backfill or by an incremental read; if not, mark ``low`` as such a
-        part.
+        If ``complete``, cover the whole days read, short of the day of a
+        part read only up to the cap (`_cover_read`).
         """
         top = self.state.oldest
         if top is None or low >= top:
             return
-        if not complete:
-            self._progress(dataclasses.replace(self.progress, watermark=low))
-        else:
+        if complete:
             self._cover_read(first_full_day(low))
         self._save(dataclasses.replace(self.state, oldest=low))
 
@@ -220,16 +212,13 @@ class _RunSync(SliceReader):
 
         Every run from ``oldest`` up is read, so a caller that has read
         all of ``start``'s day and the days after it below ``oldest``
-        completes them. Stops short of the day of a part read only up to
-        the cap, by the backfill or by an incremental read.
+        completes them. Stops short of the day of the oldest part read
+        only up to the cap (the ``runs_gap`` state).
         """
         top = self.state.oldest
         if top is None:
             return
         end = first_full_day(top) - DAY
-        capped = self.progress.watermark
-        if capped is not None and capped >= top:
-            end = min(end, capped.date() - DAY)
         if self.gap_low is not None:
             end = min(end, self.gap_low.astimezone(UTC).date() - DAY)
         self._cover(start, end)
@@ -362,11 +351,6 @@ class _RunSync(SliceReader):
         """Store ``state`` as the hole the incremental read left."""
         self.store.set_sync_state(state)
         self.hole = state
-
-    def _progress(self, state: SyncState) -> None:
-        """Store ``state`` as this repository's backfill progress."""
-        self.store.set_sync_state(state)
-        self.progress = state
 
     def _save(self, state: SyncState) -> None:
         """Store ``state`` as this repository's run sync state."""
