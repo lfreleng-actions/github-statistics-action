@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from .bars3d import render_chart
+from .charts import TargetChart, render_target
 from .images import write_derivatives
 from .layout import plan_chart
 from .model import (
@@ -35,7 +36,9 @@ __all__ = [
     "RenderedChart",
     "Series",
     "Style",
+    "TargetChart",
     "plan_chart",
     "render_chart",
+    "render_target",
     "write_derivatives",
 ]

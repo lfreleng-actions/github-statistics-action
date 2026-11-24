@@ -103,7 +103,6 @@ def _names(charts: list[Any]) -> list[str]:
     return [chart.chart.path.name for chart in charts]
 
 
-@pytest.mark.xfail(strict=True)
 def test_default_configuration_writes_fifteen_masters_and_derivatives(
     tmp_path: Path,
 ) -> None:
@@ -117,7 +116,6 @@ def test_default_configuration_writes_fifteen_masters_and_derivatives(
     )
 
 
-@pytest.mark.xfail(strict=True)
 def test_series_pairs_follow_the_metric(tmp_path: Path) -> None:
     from github_statistics.config.models import Metrics
 
@@ -141,7 +139,6 @@ def test_series_pairs_follow_the_metric(tmp_path: Path) -> None:
     assert charts[0].spec.first.values == (0, 1, 0, 0, 0, 0, 0, 0, 0, 0)
 
 
-@pytest.mark.xfail(strict=True)
 def test_disabled_metric_renders_nothing(tmp_path: Path) -> None:
     from github_statistics.config.models import Metrics
 
@@ -151,14 +148,12 @@ def test_disabled_metric_renders_nothing(tmp_path: Path) -> None:
     assert not any(name.startswith("issues-") for name in _names(charts))
 
 
-@pytest.mark.xfail(strict=True)
 def test_classes_reduced_to_all(tmp_path: Path) -> None:
     charts = _render(tmp_path, _config(classes=("all",)))
 
     assert _names(charts) == [f"{metric}-all.png" for metric in DEFAULT_METRICS]
 
 
-@pytest.mark.xfail(strict=True)
 def test_palette_and_back_on_tie_overrides_reach_the_spec(tmp_path: Path) -> None:
     from types import MappingProxyType
 
@@ -182,7 +177,6 @@ def test_palette_and_back_on_tie_overrides_reach_the_spec(tmp_path: Path) -> Non
     assert workflows.back_on_tie == "runs"
 
 
-@pytest.mark.xfail(strict=True)
 def test_title_subtitle_and_footer_for_a_known_store(tmp_path: Path) -> None:
     from github_statistics import __version__
 
@@ -205,7 +199,6 @@ def test_title_subtitle_and_footer_for_a_known_store(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True)
 def test_coverage_goes_to_the_renderer_unchanged(tmp_path: Path) -> None:
     charts = _render(tmp_path, _config(classes=("all",)))
 
@@ -214,7 +207,6 @@ def test_coverage_goes_to_the_renderer_unchanged(tmp_path: Path) -> None:
     assert charts[0].chart.gap_slabs > 0
 
 
-@pytest.mark.xfail(strict=True)
 def test_single_repository_target_names_the_repository(tmp_path: Path) -> None:
     from github_statistics.config import Target
 
@@ -225,7 +217,6 @@ def test_single_repository_target_names_the_repository(tmp_path: Path) -> None:
     assert charts[0].spec.title == "acme/a — pull requests per day"
 
 
-@pytest.mark.xfail(strict=True)
 def test_derivatives_take_each_configured_width(tmp_path: Path) -> None:
     from PIL import Image
 
@@ -248,7 +239,6 @@ def test_derivatives_take_each_configured_width(tmp_path: Path) -> None:
     assert widths == [96, 192]
 
 
-@pytest.mark.xfail(strict=True)
 def test_svg_output_is_refused_before_any_file_is_written(tmp_path: Path) -> None:
     from github_statistics.config.models import Render
 
@@ -259,7 +249,6 @@ def test_svg_output_is_refused_before_any_file_is_written(tmp_path: Path) -> Non
     assert not (tmp_path / "acme").exists()
 
 
-@pytest.mark.xfail(strict=True)
 def test_oversized_derivative_is_refused_before_any_file_is_written(
     tmp_path: Path,
 ) -> None:
@@ -272,7 +261,6 @@ def test_oversized_derivative_is_refused_before_any_file_is_written(
     assert not (tmp_path / "acme").exists()
 
 
-@pytest.mark.xfail(strict=True)
 def test_two_renders_with_the_same_now_are_byte_identical(tmp_path: Path) -> None:
     config = _config(classes=("all",))
     first = _render(tmp_path / "one", config)
@@ -299,7 +287,6 @@ def _invoke(*args: str) -> Any:
     return runner.invoke(app, list(args))
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.usefixtures("_isolated")
 def test_render_command_without_a_store_says_run_collect(tmp_path: Path) -> None:
     result = _invoke(
@@ -311,7 +298,6 @@ def test_render_command_without_a_store_says_run_collect(tmp_path: Path) -> None
     assert not (tmp_path / "cache").exists()
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.usefixtures("_isolated")
 def test_render_command_reads_the_store_and_lists_the_files(tmp_path: Path) -> None:
     from github_statistics.store import Store, store_path
@@ -348,7 +334,6 @@ def test_render_command_reads_the_store_and_lists_the_files(tmp_path: Path) -> N
     assert path.read_bytes() == before
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.usefixtures("_isolated")
 def test_render_command_builds_the_series_in_one_read_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -442,7 +427,6 @@ def _invoke_selected(tmp_path: Path, *selection: str) -> Any:
     )
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.usefixtures("_isolated")
 @pytest.mark.parametrize(
     "selection", [("--repo", "example/a"), ("--exclude", "b"), ("--include", "a*")]
@@ -461,7 +445,6 @@ def test_render_command_refuses_a_selection_the_store_cannot_honour(
     assert not (tmp_path / "site").exists()
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.usefixtures("_isolated")
 def test_render_command_accepts_a_selection_matching_the_window_scope(
     tmp_path: Path,
@@ -474,7 +457,6 @@ def test_render_command_accepts_a_selection_matching_the_window_scope(
     assert len(result.output.split()) == 3
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.usefixtures("_isolated")
 def test_render_command_ignores_a_repository_in_scope_on_no_day(
     tmp_path: Path,
@@ -488,7 +470,6 @@ def test_render_command_ignores_a_repository_in_scope_on_no_day(
     assert len(result.output.split()) == 3
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.usefixtures("_isolated")
 def test_render_command_reports_a_store_it_cannot_read(tmp_path: Path) -> None:
     from github_statistics.store import store_path
@@ -505,7 +486,6 @@ def test_render_command_reports_a_store_it_cannot_read(tmp_path: Path) -> None:
     assert not (tmp_path / "site").exists()
 
 
-@pytest.mark.xfail(strict=True)
 def test_render_size_must_keep_the_master_shape(tmp_path: Path) -> None:
     from github_statistics.config.models import Render
 
