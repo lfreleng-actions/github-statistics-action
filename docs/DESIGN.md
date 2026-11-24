@@ -917,8 +917,12 @@ backing off once none remains, and at every final rate-limit response,
 and the collector stops cleanly with its partial coverage. A rate limit
 is a `429`, or a `403` with `Retry-After`, with
 `x-ratelimit-remaining: 0`, or with a body naming a secondary rate
-limit; a `403` or `429` naming one that gives no retry time waits a
-minute, doubling on each retry after. While
+limit. One with `Retry-After` waits that long; one with
+`x-ratelimit-remaining: 0` and no `Retry-After` waits until its
+`x-ratelimit-reset`, and gives up at once when that is past the wait
+limit; a `403` or `429` naming a secondary limit that gives no retry
+time waits a minute, doubling on each retry after; any other backs
+off exponentially. While
 a request backs off from a rate limit, every other request for the same
 resource (core, search or GraphQL), queued or retrying, waits until
 that backoff ends rather than sending into the limit, and waits without
@@ -941,7 +945,8 @@ it did not reach. A GraphQL `429`, or a `403` with a rate-limit header,
 retries like any other request; one
 that outlasts the retries stops the GraphQL pool, as does at once an
 HTTP `200` payload reporting a rate limit, budgeted or not: a
-`RATE_LIMITED` error stops GraphQL requests, and an error message
+primary limit (a `RATE_LIMITED` error, or a `RATE_LIMIT` one with
+code `graphql_rate_limit`) stops GraphQL requests, and an error message
 naming a secondary limit stops every request. The pool stays
 stopped for the rest of the run, whatever queries settle after it, and
 queued queries are not sent once it has. A

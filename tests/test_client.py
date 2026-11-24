@@ -1643,7 +1643,6 @@ async def test_budgeted_terminal_rate_limit_raises_budget_exhausted() -> None:
     assert budget.rest_left > 0
 
 
-@pytest.mark.xfail(strict=True)
 async def test_graphql_rate_limit_code_stops_the_batch() -> None:
     from github_statistics.client import Budget, batched, graphql
 
@@ -1671,7 +1670,6 @@ async def test_graphql_rate_limit_code_stops_the_batch() -> None:
     assert out.remaining == [1, 2, 3]
 
 
-@pytest.mark.xfail(strict=True)
 async def test_primary_graphql_error_in_a_403_stops_only_its_resource() -> None:
     primary = {"errors": [{"type": "RATE_LIMITED", "message": "slow down"}]}
     headers = {"Retry-After": "600", "x-ratelimit-remaining": "0"}
@@ -1685,7 +1683,6 @@ async def test_primary_graphql_error_in_a_403_stops_only_its_resource() -> None:
     assert other.status_code == 200 and search.call_count == 1
 
 
-@pytest.mark.xfail(strict=True)
 async def test_spent_quota_waits_for_its_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
