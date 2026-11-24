@@ -17,8 +17,6 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-pytestmark = pytest.mark.xfail(strict=True, reason="export not built yet")
-
 runner = CliRunner()
 
 UNTIL = date(2026, 3, 10)
