@@ -107,3 +107,30 @@ class DayRange:
 
     from_day: date
     to_day: date
+
+
+@dataclass(frozen=True)
+class ActorDayCount:
+    """How many events one actor made on one day, from an aggregate query."""
+
+    day: date
+    login: str | None
+    account_type: str | None
+    count: int
+
+
+@dataclass(frozen=True)
+class RunDayCount:
+    """Runs and their jobs on one day, for one actor, event kind and conclusion.
+
+    A scheduled run carries no ``login`` or ``account_type``: it is
+    credited to no one (design §7.3).
+    """
+
+    day: date
+    login: str | None
+    account_type: str | None
+    scheduled: bool
+    conclusion: str | None
+    runs: int
+    jobs: int

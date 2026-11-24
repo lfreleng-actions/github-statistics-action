@@ -8,8 +8,8 @@ from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 
 from . import codec
-from .activity import ActivityStore
-from .base import assignments, chunks, marks
+from .aggregates import AggregateStore
+from .base import assignments, marks
 from .models import DayRange, Item, Member, Run, SyncState
 from .schema import REPOSITORY_TABLES, TABLES
 
@@ -20,7 +20,7 @@ _UPSERT_SYNC = (
 )
 
 
-class Store(ActivityStore):
+class Store(AggregateStore):
     """One SQLite store, used as a context manager.
 
     Every write method runs in one transaction, so an exception, or a
@@ -33,28 +33,27 @@ class Store(ActivityStore):
     def replace_members(self, org: str, logins: Iterable[str], today: date) -> None:
         """Make ``logins`` the public members of ``org`` as seen ``today``.
 
-        Logins already stored keep their ``first_seen``; logins no longer
-        listed are deleted.
+        Organisation names match whatever their case, as GitHub's do, so
+        the rows of every spelling of ``org`` are replaced and stored
+        under ``org``. Logins already stored keep their earliest
+        ``first_seen``; logins no longer listed are deleted.
         """
-        current = set(logins)
+        current = sorted(set(logins))
         seen = codec.day(today)
         with self._transaction() as connection:
-            stored = {
-                row[0]
-                for row in connection.execute(
-                    "SELECT login FROM members WHERE org = ?", (org,)
-                )
-            }
-            for chunk in chunks(sorted(stored - current)):
-                connection.execute(
-                    f"DELETE FROM members WHERE org = ? AND login IN ({marks(len(chunk))})",
-                    (org, *chunk),
-                )
+            first_seen: dict[str, str] = {}
+            for login, first in connection.execute(
+                "SELECT login, first_seen FROM members WHERE lower(org) = lower(?)",
+                (org,),
+            ):
+                first_seen[login] = min(first_seen.get(login, first), first)
+            connection.execute(
+                "DELETE FROM members WHERE lower(org) = lower(?)", (org,)
+            )
             connection.executemany(
                 "INSERT INTO members (org, login, first_seen, last_seen)"
-                " VALUES (?, ?, ?, ?)"
-                " ON CONFLICT (org, login) DO UPDATE SET last_seen = excluded.last_seen",
-                ((org, login, seen, seen) for login in sorted(current)),
+                " VALUES (?, ?, ?, ?)",
+                ((org, login, first_seen.get(login, seen), seen) for login in current),
             )
 
     def members(self, org: str) -> list[Member]:
