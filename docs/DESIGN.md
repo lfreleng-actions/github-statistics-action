@@ -365,6 +365,26 @@ and the loader's `resolve` rejects the same combinations for any caller.
 `--repo` names exact repositories: a name holding anything GitHub does
 not allow in one, a glob character included, fails.
 
+`doctor` takes the shared options and `--offline`, writes nothing, and
+prints in order: the winning configuration source and each target's
+identity lists with their provenance; each target's token variable, by
+name and never by value, and the `GET /rate_limit` count left; the
+resolved scope, naming each selected repository and each dropped one
+with its reason; what `cache info` prints; each enabled metric's
+complete, partial and missing days over the window, and the
+workflow-runs horizon; the
+public members held per member organisation; and every unclassified
+bot with the keys to add it to (`identities.org_bots` or
+`identities.external_bots`). `--offline` skips the rate limit and
+scope reads. The scope reads spend the target's configured budget,
+seeded from the rate limit so they keep its reserve, and pass the
+store's repositories as known, as `collect` does; when the rate limit
+gives no count, `doctor` skips them. A token-shaped variable name or
+identity value shows redacted, as in `config show`. It exits 4 for an
+invalid configuration and 3 for a rejected token; it reports a spent
+budget, a skipped scope, a missing or unreadable store, an empty scope
+and unclassified bots without failing.
+
 ## 5. Scope resolution
 
 The single most important abstraction. A **target** is one owner plus a
