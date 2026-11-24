@@ -119,7 +119,6 @@ def _github(remaining: int = 4999) -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 def test_offline_reports_every_section_and_makes_no_request(tmp_path: Path) -> None:
     path = _seed(tmp_path)
     with respx.mock(assert_all_called=False) as mock:
@@ -157,7 +156,6 @@ def test_offline_reports_every_section_and_makes_no_request(tmp_path: Path) -> N
     )
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_online_reports_rate_limit_and_dropped_repositories(tmp_path: Path) -> None:
     _seed(tmp_path)
@@ -171,7 +169,6 @@ def test_online_reports_rate_limit_and_dropped_repositories(tmp_path: Path) -> N
     assert not any("members" in str(call.request.url) for call in respx.calls)
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_the_token_value_never_appears(tmp_path: Path) -> None:
     _seed(tmp_path)
@@ -182,7 +179,6 @@ def test_the_token_value_never_appears(tmp_path: Path) -> None:
     assert SECRET not in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 def test_an_unset_token_is_reported_by_name(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -192,7 +188,6 @@ def test_an_unset_token_is_reported_by_name(
     assert "token for acme: $GITHUB_TOKEN is not set" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_a_rejected_token_exits_three(tmp_path: Path) -> None:
     respx.get(f"{API}/rate_limit").respond(401, json={})
@@ -202,7 +197,6 @@ def test_a_rejected_token_exits_three(tmp_path: Path) -> None:
     assert SECRET not in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 def test_an_invalid_configuration_exits_four(tmp_path: Path) -> None:
     from github_statistics.cli import app
 
@@ -211,7 +205,6 @@ def test_an_invalid_configuration_exits_four(tmp_path: Path) -> None:
     assert "error:" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 def test_a_missing_store_is_reported_without_a_traceback(tmp_path: Path) -> None:
     result = _doctor(tmp_path, "--offline")
     assert result.exit_code == 0, result.output
@@ -221,7 +214,6 @@ def test_a_missing_store_is_reported_without_a_traceback(tmp_path: Path) -> None
     assert not (tmp_path / "cache").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 def test_a_corrupt_store_is_reported_and_the_rest_still_runs(tmp_path: Path) -> None:
     from github_statistics.store import store_path
 
@@ -238,7 +230,6 @@ def test_a_corrupt_store_is_reported_and_the_rest_still_runs(tmp_path: Path) -> 
     assert "unclassified bots of acme: 1" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_scope_reads_keep_the_reserve_and_report_a_spent_budget(
     tmp_path: Path,
@@ -252,7 +243,6 @@ def test_scope_reads_keep_the_reserve_and_report_a_spent_budget(
     assert [call.request.url.path for call in respx.calls] == ["/rate_limit"]
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_scope_reads_stop_at_the_configured_budget(tmp_path: Path) -> None:
     _seed(tmp_path)
@@ -264,7 +254,6 @@ def test_scope_reads_stop_at_the_configured_budget(tmp_path: Path) -> None:
     assert paths == ["/rate_limit", "/users/acme"]
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_scope_is_skipped_without_a_rate_limit_count(tmp_path: Path) -> None:
     _seed(tmp_path)
@@ -277,7 +266,6 @@ def test_scope_is_skipped_without_a_rate_limit_count(tmp_path: Path) -> None:
     assert "coverage of acme" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_a_stored_repository_turned_private_is_reported(tmp_path: Path) -> None:
     from github_statistics.store import Store
@@ -299,7 +287,6 @@ def test_a_stored_repository_turned_private_is_reported(tmp_path: Path) -> None:
     assert "  dropped acme/hidden: not public" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 def test_a_store_failing_a_health_query_is_reported(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -319,7 +306,6 @@ def test_a_store_failing_a_health_query_is_reported(
     assert f"cannot read the store for acme at {path}: database disk" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 @respx.mock
 def test_a_pasted_token_is_redacted(tmp_path: Path) -> None:
     pasted = "ghp_pasted_into_the_configuration"
@@ -333,7 +319,6 @@ def test_a_pasted_token_is_redacted(tmp_path: Path) -> None:
     assert "rejected the token in $<redacted: looks like a token>" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="doctor is not implemented yet")
 def test_a_pasted_member_org_is_redacted(tmp_path: Path) -> None:
     pasted = "ghp_pasted_into_the_configuration"
     _seed(tmp_path)

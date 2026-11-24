@@ -15,6 +15,7 @@ from github_statistics import __version__
 from .cache import cache_app
 from .collect import collect_command
 from .config import config_app
+from .doctor import doctor
 from .export import export
 from .render import render
 from .scope import scope
@@ -30,6 +31,7 @@ app = typer.Typer(
 )
 app.add_typer(config_app)
 app.add_typer(cache_app)
+app.command()(doctor)
 app.command()(scope)
 app.command()(export)
 app.command(name="collect")(collect_command)
