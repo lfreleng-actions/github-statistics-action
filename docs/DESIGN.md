@@ -1155,23 +1155,49 @@ classes); `classes` in the configuration can add the `humans` and
 
 ### 7.4 Leaderboards and repository table
 
-Per target, one table of contributors, credited to authors:
+Per target, one table of contributors (`series/leaderboard.py`), one
+row per actor over the window, bots included, credited to authors:
 
-- **Pull requests:** opened, merged, closed without merging.
-- **Issues:** opened, closed.
-- **Reviews:** reviews submitted, pull requests reviewed (distinct),
-  approvals, changes requested.
-- **CI:** workflow runs triggered.
-- Login, actor class, and a total.
+<!-- markdownlint-disable MD013 -->
 
-`merged_by` and `closed_by` are available as extra columns behind
-`contributors.columns`, off by default. The class beside a login is the
-public one (§7.1), so the table tells a reader nothing GitHub does not
-already show. Bot classes start hidden behind
-a one-click toggle per class; `contributors.top_n` (default 100, `0`
-for all) caps the rows. A second table lists repositories with the same
-counts plus their coverage, so a reader can see which repository drives
-a spike. Both tables are sortable and searchable in the browser (§8.5).
+| Column                                                      | Meaning                                                                                                   |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `login`                                                     | The display form: a `[bot]`-suffixed form, stored or in a bot list, wins; a `Bot`-typed login gains one   |
+| `class`                                                     | The public class (§7.1)                                                                                   |
+| `prs_opened`, `prs_merged`, `prs_closed_unmerged`           | Pull requests authored, by `created_at`, `merged_at`, and `closed_at` with no merge                       |
+| `issues_opened`, `issues_closed`                            | Issues authored, by `created_at` and `closed_at`                                                          |
+| `reviews`, `prs_reviewed`, `approvals`, `changes_requested` | Reviews submitted; distinct pull requests reviewed; reviews in state `APPROVED`; in `CHANGES_REQUESTED`   |
+| `runs_triggered`                                            | Workflow runs triggered, scheduled runs left out                                                          |
+| `total`                                                     | The sum of every count column above                                                                       |
+
+<!-- markdownlint-enable MD013 -->
+
+`prs_merged` is the author's, not the merger's. A review of one's own
+pull request counts as a review, and a dismissed review counts in
+`reviews` and `prs_reviewed` and in no state column. The two forms of
+a bot login, `name` and `name[bot]`, share one row, and a pull
+request either form reviewed counts once in `prs_reviewed`; where they
+classify apart, the bot class wins. No login gets credit for a
+scheduled run (§7.3). The table leaves out ignored logins, actors
+GitHub reports without a login, and events from repositories out of
+scope on the day. Rows sort by `total` descending, then login.
+
+`merged_by` and `closed_by` in `contributors.columns`, off by default,
+add the columns `merged_as_merger` (pull requests merged in the window
+by the login) and `closed_as_closer` (issues and pull requests closed
+by it); neither counts in `total`. The class beside a login is
+the public one (§7.1), so the table tells a reader nothing GitHub does
+not already show. Bot classes start hidden behind a one-click toggle
+per class; `contributors.top_n` (default 100, `0` for all) caps the
+rows.
+
+A second table (`series/repositories.py`) has one row per repository
+in scope on any day of the window: pull requests opened and closed,
+issues opened and closed, runs and jobs, counted by the rules of the
+daily series (§7.3), and per charted metric the share of window days
+graded `complete` for that repository alone, so a reader can see
+which repository drives a spike or a gap. Both tables are sortable and
+searchable in the browser (§8.5).
 
 ## 8. Rendering
 
@@ -1289,14 +1315,35 @@ fetches the script.
 
 ### 8.6 Data export
 
-Alongside the images, each target publishes `data/series.json` (per
-metric, series and class: an array of `{day, value, coverage}`),
-`data/contributors.json`, `data/repositories.json`,
-`data/coverage.json` and `data/reviews.json` (one record per review:
-repository, pull request, reviewer and class, state, submission
-time). These are small (a year of daily points is
-kilobytes per series), make the site self-describing, and are the hook
-for any later interactive front end.
+`github-statistics export [--format json|csv]` reads each target's
+store and nothing else: it needs no token, makes no request, and fails
+rather than create a store that is missing or rebuild one that is
+stale. It writes under `<output>/<owner>/data/`, the owner sanitised
+as for the store path (§6.1):
+
+- `series.json`: per metric, series and class, an array of
+  `{day, value}`, and per metric the coverage of each day;
+- `contributors.json`, `repositories.json`: the two tables of §7.4;
+- `coverage.json`: per metric, the days complete, partial and
+  missing, and the runs horizon;
+- `reviews.json`: one record per review submitted in the window on a
+  day its repository was in scope, ignored logins left out:
+  repository, pull request number, reviewer, class, state, submission
+  time;
+- `meta.json`: tool version, window, target, scope rule, generation
+  date, the unclassified bots, and the resolved identity lists with
+  their provenance.
+
+Every file is compact JSON (no indent, `,` and `:` separators, sorted
+keys, UTF-8), so a fixed store gives byte-identical files and
+`reviews.json` stays small at tens of thousands of records; each is a
+self-contained document that copies no other table. `--format csv`
+writes one file per table instead: `series.csv` in long form (metric,
+series, class, day, value), `coverage.csv` (metric, day, coverage),
+`contributors.csv`, `repositories.csv` with a `coverage_<metric>`
+column per metric, and `reviews.csv`; the runs horizon and the
+metadata stay in the JSON export. The files make the site
+self-describing and are the hook for any later interactive front end.
 
 ### 8.7 Spike result
 

@@ -14,6 +14,7 @@ from github_statistics import __version__
 
 from .cache import cache_app
 from .config import config_app
+from .export import export
 from .scope import scope
 
 DERIVATIVE_WIDTH = 1920
@@ -28,6 +29,7 @@ app = typer.Typer(
 app.add_typer(config_app)
 app.add_typer(cache_app)
 app.command()(scope)
+app.command()(export)
 
 
 def _version_callback(value: bool) -> None:
