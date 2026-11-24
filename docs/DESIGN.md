@@ -1319,12 +1319,59 @@ a chart must never let a failed run masquerade as a quiet day.
 
 ### 8.4 Outputs per chart
 
-- `img/<metric>-<class>.png` at 3840×2160, the master.
-- `img/<metric>-<class>-1920.png`, a Lanczos downscale by Pillow for
-  inline use through `srcset`; the page links to the master.
+`github-statistics render` opens each target's store without writing
+to it, builds its series (§7.3) and draws one chart per enabled metric
+and per view in `classes`, over the configured window. It needs no token and sends
+no request; with no store for a target it fails and says to run
+`collect` first, and with one SQLite cannot read it fails naming the
+file. A store cannot narrow to a repository selection, so
+when the target's selection drops a repository the store held in
+scope on any day of the window, `render` fails before writing a file
+rather than chart that repository under the selection's title; one
+that left scope before the window does not count. It checks every
+store before it draws the first chart. A view with no events still
+renders; a metric off in `metrics` renders nothing. It overwrites the
+files it writes and removes none, so a chart an earlier render wrote
+for a metric, view or width since dropped stays in place: render into
+an empty output directory, as the daily workflow (§9.2) does, so
+that what it publishes is the current charts and nothing older.
+Under `<output>/<owner>/`, with hyphens for underscores in file names
+(`pull-requests-org-bot.png`):
+
+- `img/<metric>-<class>.png` at `render.width`×`render.height`
+  (3840×2160), the master. Both sides are the same whole number
+  times 16 and 9, since the size scales the §8.2 geometry by its dots
+  per inch alone.
+- `img/<metric>-<class>-<width>.png` per width in `render.derivatives`
+  (1920), a Lanczos downscale by Pillow for inline use through
+  `srcset`; the page links to the master. Each width lies within
+  1..`render.width`; `render` refuses one outside it before writing a
+  file.
 - `img/<metric>-<class>.svg` when `render.svg` is on (off by default:
   resolution-independent and small for 730 polygons, but gradients and
-  hatching inflate it).
+  hatching inflate it). The renderer draws PNG alone for now, so
+  `render` refuses `render.svg` on, before writing a file, rather
+  than report success without the SVGs.
+
+Pull requests and issues draw opened and closed, workflows runs and
+jobs, workflow outcomes succeeded and failed. On a tie the back row
+defaults to closed for both item metrics, jobs for workflows and
+failed for workflow outcomes (`back_on_tie`). The metric's coverage
+goes to the renderer unchanged. The text reads:
+
+- title: `<owner> — pull requests per day` (`issues per day`,
+  `workflow runs and jobs per day`, `workflow outcomes per day`), with
+  `<owner>/<repo>` for a target that selects one repository;
+- subtitle: `<N> days to <until> (UTC) · <R> repositories · <view> ·
+  <first> vs <second>`, where `R` counts the repositories in scope on
+  the last day and the views read `everyone`, `members`,
+  `external contributors`, `our bots`, `external bots`, `humans` and
+  `bots`;
+- footer: `Coverage: <c> of <N> days complete`, then
+  `· <g> days without data` when any day has none,
+  `· github-statistics <version>` and `· generated <date>`. The date
+  alone, taken from the caller's clock, so two renders on one day are
+  byte-identical.
 
 Expected rendering cost: single-digit seconds per 4K chart; fifteen
 charts per target (three metrics by five views) stay around a minute.

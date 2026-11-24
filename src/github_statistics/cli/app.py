@@ -16,6 +16,7 @@ from .cache import cache_app
 from .collect import collect_command
 from .config import config_app
 from .export import export
+from .render import render
 from .scope import scope
 
 DERIVATIVE_WIDTH = 1920
@@ -32,6 +33,7 @@ app.add_typer(cache_app)
 app.command()(scope)
 app.command()(export)
 app.command(name="collect")(collect_command)
+app.command()(render)
 
 
 def _version_callback(value: bool) -> None:
