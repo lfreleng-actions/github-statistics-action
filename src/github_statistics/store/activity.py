@@ -52,6 +52,8 @@ _UPSERT_RUN = (
 )
 # The coverage metric a run's job count completes (design §6.4).
 JOBS_METRIC = "jobs"
+# The coverage metric of the runs listing, which bounds jobs coverage.
+RUNS_METRIC = "runs"
 
 _INSERT_REVIEW = (
     f"INSERT OR REPLACE INTO reviews ({', '.join(codec.REVIEW_COLUMNS)}) "
@@ -215,6 +217,36 @@ class ActivityStore(StoreBase):
                 ((jobs, run_id) for run_id, jobs in counts.items()),
             )
 
+    def restore_jobs_coverage(self) -> None:
+        """Set each repository's jobs coverage to the days whose runs all have counts.
+
+        That is its runs coverage less every day holding a run with no
+        job count; a covered day without runs has nothing to count and
+        is covered too. Recomputed whole, so a step that stopped early
+        loses nothing the next one cannot restore.
+        """
+        with self._transaction() as connection:
+            uncounted: dict[str, set[str]] = {}
+            for repo, day in connection.execute(
+                "SELECT DISTINCT repo, substr(created_at, 1, 10) FROM runs"
+                " WHERE jobs IS NULL"
+            ):
+                uncounted.setdefault(repo, set()).add(day)
+            pieces = [
+                (repo, JOBS_METRIC, low, high)
+                for repo, start, end in connection.execute(
+                    "SELECT repo, from_day, to_day FROM coverage WHERE metric = ?",
+                    (RUNS_METRIC,),
+                ).fetchall()
+                for low, high in _without(start, end, uncounted.get(repo, set()))
+            ]
+            connection.execute("DELETE FROM coverage WHERE metric = ?", (JOBS_METRIC,))
+            connection.executemany(
+                "INSERT INTO coverage (repo, metric, from_day, to_day)"
+                " VALUES (?, ?, ?, ?)",
+                pieces,
+            )
+
     def runs_between(
         self, from_day: date, to_day: date, repos: Sequence[str] | None = None
     ) -> list[Run]:
@@ -263,3 +295,17 @@ def _uncover(connection: sqlite3.Connection, repo: str, metric: str, day: str) -
         "INSERT INTO coverage (repo, metric, from_day, to_day) VALUES (?, ?, ?, ?)",
         ((repo, metric, low, high) for low, high in pieces),
     )
+
+
+def _without(start: str, end: str, days: set[str]) -> list[tuple[str, str]]:
+    """The ranges left of ``start`` to ``end`` once ``days`` are taken out."""
+    one = timedelta(days=1)
+    pieces = []
+    low = start
+    for day in sorted(d for d in days if start <= d <= end):
+        if low < day:
+            pieces.append((low, codec.day(codec.parse_day(day) - one)))
+        low = codec.day(codec.parse_day(day) + one)
+    if low <= end:
+        pieces.append((low, end))
+    return pieces
