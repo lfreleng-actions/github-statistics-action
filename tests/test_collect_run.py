@@ -20,8 +20,6 @@ NOW = datetime(2026, 3, 10, 6, tzinfo=UTC)
 WINDOW = date(2026, 3, 7)
 YESTERDAY = date(2026, 3, 9)
 
-pytestmark = pytest.mark.xfail(strict=True, reason="collect not written yet")
-
 
 def _run() -> Any:
     """The orchestration module, loaded when a test runs."""
@@ -477,7 +475,6 @@ async def test_a_refused_graphql_query_propagates(
         await _collect(store)
 
 
-@pytest.mark.xfail(strict=True)
 async def test_until_ends_the_window(monkeypatch: pytest.MonkeyPatch) -> None:
     """``until`` sets the window read and reported, not ``now``."""
     store = _store()
@@ -492,7 +489,6 @@ async def test_until_ends_the_window(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.gap_days == 0
 
 
-@pytest.mark.xfail(strict=True)
 async def test_an_outage_marks_its_repository_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -519,7 +515,6 @@ async def _outage_after(ticks: int) -> None:
     raise TransportError("GET /repos/acme/b: timed out")
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_sibling_outage_keeps_finished_run_phases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -546,7 +541,6 @@ async def test_a_sibling_outage_keeps_finished_run_phases(
     assert result.exhausted is None
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_sibling_outage_keeps_finished_item_reports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -578,7 +572,6 @@ def _forbidden(_request: httpx.Request) -> httpx.Response:
     return httpx.Response(200, json={"data": {"nodes": [None]}, "errors": [error]})
 
 
-@pytest.mark.xfail(strict=True)
 async def test_an_item_enrichment_failure_makes_its_repository_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -614,7 +607,6 @@ async def test_an_item_enrichment_failure_makes_its_repository_unreadable(
     assert result.exhausted is None
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_job_count_failure_makes_its_repository_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

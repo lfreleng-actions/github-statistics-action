@@ -16,8 +16,6 @@ API = "https://api.github.com"
 
 runner = CliRunner()
 
-pytestmark = pytest.mark.xfail(strict=True, reason="collect command not written yet")
-
 
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -103,7 +101,6 @@ def test_refresh_reaches_collect(
     assert calls[0]["refresh"] is True
 
 
-@pytest.mark.xfail(strict=True)
 def test_until_reaches_collect(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """``--until`` is passed through as the window's end."""
     calls = _stub(monkeypatch, _result())

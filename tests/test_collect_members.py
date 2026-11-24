@@ -15,8 +15,6 @@ import respx
 API = "https://api.github.com"
 TODAY = date(2026, 3, 10)
 
-pytestmark = pytest.mark.xfail(strict=True, reason="sync_members not written yet")
-
 
 async def _instant(_seconds: float) -> None:
     """A sleep that returns at once."""
