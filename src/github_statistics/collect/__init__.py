@@ -14,6 +14,8 @@ from .items import (
     sync_items,
 )
 from .jobs import JobsResult, enrich_jobs
+from .members import sync_members
+from .run import CollectResult, MetricCoverage, collect
 from .runs import RUNS_METRIC, RunSyncResult, runs_horizon, sync_all_runs, sync_runs
 from .sweep import SweepResult, sweep_runs
 
@@ -22,11 +24,14 @@ __all__ = [
     "ITEMS_METRIC",
     "PULL_REQUESTS_METRIC",
     "RUNS_METRIC",
+    "CollectResult",
     "EnrichResult",
     "ItemSyncResult",
     "JobsResult",
+    "MetricCoverage",
     "RunSyncResult",
     "SweepResult",
+    "collect",
     "enrich_items",
     "enrich_jobs",
     "runs_horizon",
@@ -34,5 +39,6 @@ __all__ = [
     "sync_all_items",
     "sync_all_runs",
     "sync_items",
+    "sync_members",
     "sync_runs",
 ]

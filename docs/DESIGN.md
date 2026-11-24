@@ -851,20 +851,53 @@ and does swap on bad days; off by default, it costs nothing extra.
 
 ### 6.5 Incremental sync, budget and backfill
 
-Each run proceeds in priority order under a request budget:
+Each run proceeds in priority order under a request budget, one step
+after another, so no listing runs alongside enrichment (§6.3). The
+window is the `--days` days ending on `--until`, yesterday (UTC) by
+default, and each read still runs up to the present:
 
-1. **Resolve scope** (one listing, a handful of requests), and read the
-   public member list of every member organisation (every page, §7.1).
-2. **Incremental sync** of every repository for items and runs, from the
-   watermarks. On a quiet repository this is one conditional request
-   per metric, answered `304` at no rate-limit cost (GitHub waives the
-   charge for an authenticated request alone).
-3. **Enrichment** of new and updated pull requests (reviews, mergers,
+1. **Resolve scope** (one listing, a handful of requests) and apply it
+   to the store. An empty scope makes no further call.
+2. **Members**: read the public member list of every member
+   organisation (every page, §7.1).
+3. **Incremental sync** from the watermarks: items for every
+   repository that has an item watermark, then the recent runs of
+   every repository. On a quiet repository this is one conditional
+   request per metric, answered `304` at no rate-limit cost (GitHub
+   waives the charge for an authenticated request alone).
+4. **Enrichment** of new and updated pull requests (reviews, mergers,
    closers) and new runs (job counts) by GraphQL batches; cheap, and
-   bounded by the day's activity.
-4. **Backfill** of the oldest uncovered slice of the window for any
-   repository whose `oldest` has not reached the window start, newest
-   slice first, until the budget runs out or coverage completes.
+   bounded by the day's activity. Items enter enrichment once their
+   listing has stored them, so the next run enriches the items a first
+   sync stores in backfill.
+5. **Backfill**: the first item sync of each repository with no item
+   watermark yet, then the oldest uncovered slice of the window for
+   any repository whose `oldest` for runs has not reached the window
+   start, newest slice first, until the budget runs out or coverage
+   completes.
+6. **Sweep** for late re-runs (§6.4), where due, for each repository
+   whose recent runs step 3 read in full.
+
+A disabled metric's collectors do not run. A spent budget, or a rate
+limit that outlasts the retries, ends the step it meets, each later
+step stops at its first request, and the run reports the first step
+it ended; a rate limit on the `GET /rate_limit` that seeds the budget
+ends the scope step. An outage, a request that fails past its
+retries or a REST or GraphQL server error, ends the step it meets and
+the later steps go on, for every repository that finished that step;
+the run reports a repository whose own read failed past its retries
+as unreadable, as it does one with an item or a run whose enrichment
+read failed alone. One repository failing
+never fails the run: the run reports it as unreadable and goes on.
+`collect --refresh` first clears the scope's watermarks and coverage,
+keeping its stored rows, so the run reads the window again; `--strict`
+exits 2 after the last target if any repository was unreadable,
+and a rejected token exits 3 at once, naming the variable that holds
+it. Each run prints, and appends to the job summary, its requests,
+GraphQL points and `304`s, each charted metric's days by coverage
+grade, and the unreadable, dropped and stalled repositories, and
+writes the `requests_used`, `coverage_complete` and `gap_days`
+outputs (§9.1).
 
 The budget is a courtesy limit, not exact accounting: GitHub enforces
 the real rate limit and the transport backs off on it, while the budget
@@ -922,7 +955,7 @@ most the queries in flight. A response that carries no core count leaves
 the observed one unchanged, so while GitHub sends none, `budget.rest`
 alone bounds the run; exactness beyond that is a non-goal. A run that
 exhausts its budget exits zero with a notice; coverage says what
-remains. Steps 2 and 3 are never starved by step 4,
+remains. Steps 3 and 4 are never starved by step 5,
 so the most recent days are always current even while history is still
 filling in.
 
@@ -1012,6 +1045,10 @@ The classifier matches organisation names whatever their case, as
 GitHub does, so a `member_orgs` entry `ACME` reads the members stored
 for `acme`, and a refresh under any spelling replaces the list stored
 under every other.
+A read that fails keeps the list stored for that organisation, and
+a spent budget stops the reads, keeping every list not yet read. For a
+target owned by a user, the owner's own name in `member_orgs` makes no
+call, since a user has no member list.
 A member who keeps their membership private counts as `external`, as
 GitHub itself presents them to the public.
 

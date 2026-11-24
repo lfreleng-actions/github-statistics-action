@@ -13,6 +13,7 @@ import typer
 from github_statistics import __version__
 
 from .cache import cache_app
+from .collect import collect_command
 from .config import config_app
 from .export import export
 from .scope import scope
@@ -30,6 +31,7 @@ app.add_typer(config_app)
 app.add_typer(cache_app)
 app.command()(scope)
 app.command()(export)
+app.command(name="collect")(collect_command)
 
 
 def _version_callback(value: bool) -> None:
