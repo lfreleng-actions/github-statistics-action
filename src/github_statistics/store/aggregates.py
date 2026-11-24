@@ -19,7 +19,16 @@ from .models import ActorDayCount, RunDayCount
 
 _ITEM_KINDS = ("issue", "pr")
 _ITEM_DAY_COLUMNS = ("created_at", "closed_at")
+_ITEM_EVENT_COLUMNS = ("created_at", "closed_at", "merged_at")
+_ITEM_ACTORS = {
+    "author": "author_type",
+    "merged_by": "merged_by_type",
+    "closed_by": "closed_by_type",
+}
 SCHEDULE_EVENT = "schedule"
+
+# One actor's count: ``(login, type, count)``.
+ActorCount = tuple[str | None, str | None, int]
 
 
 def _in_scope(table: str, column: str) -> str:
@@ -120,6 +129,153 @@ class AggregateStore(ActivityStore):
         )
         pairs = {(login, kind) for login, kind in rows if login is not None}
         return sorted(pairs, key=lambda pair: (pair[0], pair[1] or ""))
+
+    def item_actor_counts(
+        self,
+        kind: str | None,
+        column: str,
+        from_day: date,
+        to_day: date,
+        *,
+        actor: str = "author",
+        unmerged: bool = False,
+    ) -> list[ActorCount]:
+        """Items per ``actor`` whose ``column`` falls in the days, in scope that day.
+
+        ``kind`` is ``"issue"``, ``"pr"`` or ``None`` for both; ``column``
+        is ``created_at``, ``closed_at`` or ``merged_at``; ``actor`` is
+        ``author``, ``merged_by`` or ``closed_by``. With ``unmerged`` only
+        items never merged count. Rows are sorted by login and type.
+        """
+        if kind is not None and kind not in _ITEM_KINDS:
+            raise ValueError(f"unknown item kind {kind!r}")
+        if column not in _ITEM_EVENT_COLUMNS:
+            raise ValueError(f"cannot count items by {column!r}")
+        if actor not in _ITEM_ACTORS:
+            raise ValueError(f"unknown item actor {actor!r}")
+        actor_type = _ITEM_ACTORS[actor]
+        low, high = codec.day_bounds(from_day, to_day)
+        where = [f"{column} >= ?", f"{column} < ?", _in_scope("items", column)]
+        params: list[str] = [low, high]
+        if kind is not None:
+            where.append("kind = ?")
+            params.append(kind)
+        if unmerged:
+            where.append("merged_at IS NULL")
+        rows = self._connection.execute(
+            f"SELECT {actor}, {actor_type}, COUNT(*) FROM items"
+            f" WHERE {' AND '.join(where)}"
+            f" GROUP BY {actor}, {actor_type} ORDER BY {actor}, {actor_type}",
+            params,
+        )
+        return [(login, account_type, count) for login, account_type, count in rows]
+
+    def review_actor_counts(
+        self, from_day: date, to_day: date
+    ) -> list[tuple[str | None, str | None, int, int, int]]:
+        """Per reviewer: reviews, approvals and changes requested.
+
+        Reviews submitted from ``from_day`` to ``to_day`` on a day their
+        repository was in scope; rows are ``(login, type, reviews,
+        approved, changes_requested)``, sorted by login.
+        """
+        low, high = codec.day_bounds(from_day, to_day)
+        rows = self._connection.execute(
+            "SELECT reviewer, reviewer_type, COUNT(*),"
+            " SUM(state = 'APPROVED'), SUM(state = 'CHANGES_REQUESTED')"
+            " FROM reviews WHERE submitted_at >= ? AND submitted_at < ?"
+            f" AND {_in_scope('reviews', 'submitted_at')}"
+            " GROUP BY reviewer, reviewer_type ORDER BY reviewer, reviewer_type",
+            (low, high),
+        )
+        return [
+            (login, account_type, reviews, approved, changes)
+            for login, account_type, reviews, approved, changes in rows
+        ]
+
+    def reviewed_pull_requests(
+        self, from_day: date, to_day: date
+    ) -> list[tuple[str | None, str | None, str, int]]:
+        """The distinct pull requests each reviewer reviewed, in scope.
+
+        Rows are ``(login, type, repo, number)``, sorted, so the caller
+        can count distinct pull requests across the forms of one login.
+        """
+        low, high = codec.day_bounds(from_day, to_day)
+        rows = self._connection.execute(
+            "SELECT DISTINCT reviewer, reviewer_type, repo, number FROM reviews"
+            " WHERE submitted_at >= ? AND submitted_at < ?"
+            f" AND {_in_scope('reviews', 'submitted_at')}"
+            " ORDER BY reviewer, reviewer_type, repo, number",
+            (low, high),
+        )
+        return [
+            (login, account_type, repo, number)
+            for login, account_type, repo, number in rows
+        ]
+
+    def run_actor_counts(self, from_day: date, to_day: date) -> list[ActorCount]:
+        """Runs per triggering actor in the days, in scope, scheduled runs left out."""
+        low, high = codec.day_bounds(from_day, to_day)
+        rows = self._connection.execute(
+            "SELECT actor, actor_type, COUNT(*) FROM runs"
+            " WHERE created_at >= ? AND created_at < ? AND event != ?"
+            f" AND {_in_scope('runs', 'created_at')}"
+            " GROUP BY actor, actor_type ORDER BY actor, actor_type",
+            (low, high, SCHEDULE_EVENT),
+        )
+        return [(login, account_type, count) for login, account_type, count in rows]
+
+    def item_repository_counts(
+        self, kind: str, column: str, from_day: date, to_day: date
+    ) -> list[tuple[str, str | None, str | None, int]]:
+        """Items of ``kind`` per repository and author by ``column``, in scope.
+
+        Rows are ``(repo, login, type, count)``, sorted, so the caller can
+        leave out ignored logins as the series do.
+        """
+        if kind not in _ITEM_KINDS:
+            raise ValueError(f"unknown item kind {kind!r}")
+        if column not in _ITEM_DAY_COLUMNS:
+            raise ValueError(f"cannot count items by {column!r}")
+        low, high = codec.day_bounds(from_day, to_day)
+        rows = self._connection.execute(
+            "SELECT repo, author, author_type, COUNT(*) FROM items"
+            f" WHERE kind = ? AND {column} >= ? AND {column} < ?"
+            f" AND {_in_scope('items', column)}"
+            " GROUP BY repo, author, author_type ORDER BY repo, author, author_type",
+            (kind, low, high),
+        )
+        return [
+            (repo, login, account_type, count)
+            for repo, login, account_type, count in rows
+        ]
+
+    def run_repository_counts(
+        self, from_day: date, to_day: date
+    ) -> list[tuple[str, str | None, str | None, bool, int, int]]:
+        """Runs and summed jobs per repository and actor, in scope.
+
+        Rows are ``(repo, login, type, scheduled, runs, jobs)``; a
+        scheduled run carries no login, as in `run_day_counts`.
+        """
+        low, high = codec.day_bounds(from_day, to_day)
+        scheduled = "event = ?"
+        rows = self._connection.execute(
+            "SELECT repo,"
+            f" CASE WHEN {scheduled} THEN NULL ELSE actor END AS login,"
+            f" CASE WHEN {scheduled} THEN NULL ELSE actor_type END AS login_type,"
+            f" {scheduled} AS is_scheduled, COUNT(*), COALESCE(SUM(jobs), 0)"
+            " FROM runs WHERE created_at >= ? AND created_at < ?"
+            f" AND {_in_scope('runs', 'created_at')}"
+            " GROUP BY repo, login, login_type, is_scheduled"
+            " ORDER BY repo, login, login_type, is_scheduled",
+            (SCHEDULE_EVENT, SCHEDULE_EVENT, SCHEDULE_EVENT, low, high),
+        )
+        return [
+            (repo, login, account_type, bool(is_scheduled), runs, jobs)
+            for repo, login, account_type, is_scheduled, runs, jobs in rows
+        ]
 
     def member_logins(self, orgs: Iterable[str]) -> list[str]:
         """The distinct stored public members of any of ``orgs``, sorted.

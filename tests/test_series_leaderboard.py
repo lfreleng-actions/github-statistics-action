@@ -10,8 +10,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.xfail(strict=True, reason="leaderboard not built yet")
-
 MEMORY = Path(":memory:")
 UNTIL = date(2026, 3, 10)
 
