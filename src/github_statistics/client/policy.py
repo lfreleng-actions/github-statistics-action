@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -86,20 +87,36 @@ def names_secondary_limit(message: Any) -> bool:
     return isinstance(message, str) and "secondary rate limit" in message.lower()
 
 
-def errors_rate_limited(errors: list[Any]) -> bool:
-    """Whether a GraphQL error list reports a rate limit.
-
-    GitHub marks a primary limit ``type: RATE_LIMITED``; a secondary
-    limit may carry only a message naming it, even in an HTTP ``200``.
-    """
+def errors_name_secondary(errors: list[Any]) -> bool:
+    """Whether a GraphQL error list names a secondary rate limit."""
     return any(
-        isinstance(error, dict)
-        and (
-            error.get("type") == "RATE_LIMITED"
-            or names_secondary_limit(error.get("message"))
-        )
+        isinstance(error, dict) and names_secondary_limit(error.get("message"))
         for error in errors
     )
+
+
+def _primary_error(error: Any) -> bool:
+    """Whether one GraphQL error reports a primary rate limit.
+
+    GitHub marks one ``type: RATE_LIMITED``, or ``type: RATE_LIMIT``
+    with ``extensions.code: graphql_rate_limit``, often with ``data: null``.
+    """
+    if not isinstance(error, dict):
+        return False
+    extensions = error.get("extensions")
+    code = extensions.get("code") if isinstance(extensions, dict) else None
+    return error.get("type") in ("RATE_LIMITED", "RATE_LIMIT") or (
+        code == "graphql_rate_limit"
+    )
+
+
+def errors_rate_limited(errors: list[Any]) -> bool:
+    """Whether a GraphQL error list reports a rate limit, primary or secondary.
+
+    A secondary limit may carry only a message naming it, even in an
+    HTTP ``200``.
+    """
+    return any(map(_primary_error, errors)) or errors_name_secondary(errors)
 
 
 def secondary_body(response: httpx.Response) -> bool:
@@ -107,7 +124,8 @@ def secondary_body(response: httpx.Response) -> bool:
 
     GitHub may answer a secondary rate limit with neither ``Retry-After``
     nor ``x-ratelimit-remaining: 0``; its message, documentation link or
-    a rate-limit error still names the limit.
+    an error message still names the limit. A primary ``RATE_LIMITED``
+    error does not, so it stops only its own resource.
     """
     if response.status_code not in (403, 429):
         return False
@@ -122,7 +140,7 @@ def secondary_body(response: httpx.Response) -> bool:
     return (
         names_secondary_limit(body.get("message"))
         or (isinstance(link, str) and "secondary-rate-limits" in link)
-        or (isinstance(errors, list) and errors_rate_limited(errors))
+        or (isinstance(errors, list) and errors_name_secondary(errors))
     )
 
 
@@ -147,7 +165,9 @@ def rate_limited(response: httpx.Response) -> bool:
 def rate_limit_delay(response: httpx.Response, backoff: float) -> float:
     """Seconds to wait out rate-limited ``response``, given the exponential ``backoff``.
 
-    ``Retry-After`` wins when it parses; a body naming a secondary limit
+    ``Retry-After`` wins when it parses; then, with
+    ``x-ratelimit-remaining: 0``, the time until its ``x-ratelimit-reset``
+    epoch, or none once it has passed; a body naming a secondary limit
     with no retry time scales ``backoff``, which doubles from one second,
     from ``SECONDARY_WAIT``: 60, 120, then 240 seconds; anything else
     takes ``backoff``.
@@ -155,6 +175,9 @@ def rate_limit_delay(response: httpx.Response, backoff: float) -> float:
     after = parse_retry_after(response.headers.get("retry-after"))
     if after is not None:
         return after
+    reset = int_header(response, "x-ratelimit-reset")
+    if response.headers.get("x-ratelimit-remaining") == "0" and reset is not None:
+        return max(reset - time.time(), 0.0)
     if secondary_body(response):
         return SECONDARY_WAIT * backoff
     return backoff

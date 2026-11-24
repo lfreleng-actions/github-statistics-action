@@ -1641,3 +1641,76 @@ async def test_budgeted_terminal_rate_limit_raises_budget_exhausted() -> None:
                     pass
     assert route.call_count == 1
     assert budget.rest_left > 0
+
+
+async def test_graphql_rate_limit_code_stops_the_batch() -> None:
+    from github_statistics.client import Budget, batched, graphql
+
+    limited = {
+        "data": None,
+        "errors": [
+            {
+                "type": "RATE_LIMIT",
+                "extensions": {"code": "graphql_rate_limit"},
+                "message": "API rate limit already exceeded for user ID 1.",
+            }
+        ],
+    }
+    with respx.mock:
+        route = respx.post(f"{API}/graphql").respond(200, json=limited)
+        async with _transport(Sleeper(), budget=Budget()) as transport:
+
+            async def fetch(chunk: list[int]) -> list[int]:
+                await graphql(transport, "query { x }", cost_estimate=1)
+                return chunk
+
+            out = await batched([1, 2, 3], 3, fetch, str)
+    assert route.call_count == 1
+    assert not out.results and not out.failed
+    assert out.remaining == [1, 2, 3]
+
+
+async def test_primary_graphql_error_in_a_403_stops_only_its_resource() -> None:
+    primary = {"errors": [{"type": "RATE_LIMITED", "message": "slow down"}]}
+    headers = {"Retry-After": "600", "x-ratelimit-remaining": "0"}
+    with respx.mock:
+        respx.get(f"{API}/a").respond(403, headers=headers, json=primary)
+        search = respx.get(f"{API}/search/issues").respond(200, json={})
+        async with _transport(Sleeper()) as transport:
+            first = await transport.request("GET", "/a")
+            other = await transport.request("GET", "/search/issues")
+    assert first.status_code == 403
+    assert other.status_code == 200 and search.call_count == 1
+
+
+async def test_spent_quota_waits_for_its_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from github_statistics.client import Budget, BudgetExhaustedError, policy
+
+    clock = SimpleNamespace(time=lambda: 1000.0)
+    monkeypatch.setattr(policy, "time", clock, raising=False)
+    sleep = Sleeper()
+    with respx.mock:
+        respx.get(f"{API}/x").mock(
+            side_effect=[
+                httpx.Response(
+                    403,
+                    headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1030"},
+                ),
+                httpx.Response(200, json={}),
+            ]
+        )
+        far = respx.get(f"{API}/y").respond(
+            403, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1600"}
+        )
+        async with _transport(sleep) as transport:
+            response = await transport.request("GET", "/x")
+        async with _transport(sleep, budget=Budget()) as transport:
+            with pytest.raises(BudgetExhaustedError):
+                await transport.request("GET", "/y")
+    assert response.status_code == 200
+    assert sleep.delays == [30.0]
+    assert far.call_count == 1

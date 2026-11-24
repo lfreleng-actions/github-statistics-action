@@ -12,8 +12,8 @@ from typing import Any, Generic, TypeVar
 
 from .errors import BudgetExhaustedError, GraphQLError
 from .policy import (
+    errors_name_secondary,
     errors_rate_limited,
-    names_secondary_limit,
     rate_limited,
     write_operation,
 )
@@ -83,14 +83,6 @@ def _timed_out(exc: GraphQLError) -> bool:
     return _names_timeout(exc.errors)
 
 
-def _names_secondary(errors: list[Any]) -> bool:
-    """Whether an error payload names a secondary rate limit."""
-    return any(
-        isinstance(error, dict) and names_secondary_limit(error.get("message"))
-        for error in errors
-    )
-
-
 def _record_rate(transport: Transport, data: Any) -> int | None:
     """Record ``data``'s ``rateLimit`` in the stats; return its cost, if any."""
     rate = data.get("rateLimit") if isinstance(data, dict) else None
@@ -139,8 +131,9 @@ async def graphql(
     A rate limit that outlasts the transport's retries (a ``429``, or a
     ``403`` with ``Retry-After``, ``x-ratelimit-remaining: 0`` or a body
     naming a secondary rate limit) stops its resource for the run. So
-    does an HTTP ``200`` payload with a ``RATE_LIMITED`` error, which
-    stops GraphQL, or with an error whose message names a secondary rate
+    does an HTTP ``200`` payload with a primary rate-limit error
+    (``RATE_LIMITED``, or ``RATE_LIMIT`` with code ``graphql_rate_limit``),
+    which stops GraphQL, or with an error whose message names a secondary rate
     limit, which stops every resource; later requests on a stopped
     resource raise ``BudgetExhaustedError`` unsent. Budgeted, the first
     such response also stops the GraphQL budget and raises
@@ -194,7 +187,7 @@ async def graphql(
             request_wide=_request_wide(payload, errors),
         )
         if errors_rate_limited(errors):
-            transport.stop(_names_secondary(errors))
+            transport.stop(errors_name_secondary(errors))
             if budget is not None:
                 budget.exhaust_graphql()
                 raise BudgetExhaustedError(
