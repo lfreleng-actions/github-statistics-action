@@ -67,4 +67,4 @@ node_modules/*
 src/github_statistics/_version.py
 
 # Site output
-site/
+/site/
