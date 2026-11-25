@@ -1,0 +1,66 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{# SPDX-FileCopyrightText: 2026 The Linux Foundation #}
+"use strict";
+
+// Table set-up: bot-class filters, then sorting and search where the
+// simple-datatables script loaded. Without it the tables stay plain.
+(function () {
+  var options = {
+    perPage: {{ per_page | tojson }},
+    perPageSelect: {{ per_page_select | tojson }}
+  };
+
+  function numberColumns(table) {
+    var select = [];
+    Array.prototype.forEach.call(table.tHead.rows[0].cells, function (cell, index) {
+      if (cell.dataset.type === "number") {
+        select.push(index);
+      }
+    });
+    return select.length ? [{ select: select, type: "number" }] : [];
+  }
+
+  function setUp(table) {
+    var rows = Array.prototype.slice.call(table.tBodies[0].rows);
+    var filters = document.querySelector(
+      'fieldset[data-filter-for="' + table.id + '"]'
+    );
+    var boxes = filters
+      ? Array.prototype.slice.call(filters.querySelectorAll("input[type=checkbox]"))
+      : [];
+    var settings = Object.assign({ columns: numberColumns(table) }, options);
+    var dataTable = null;
+
+    function build() {
+      var shown = {};
+      boxes.forEach(function (box) {
+        shown[box.value] = box.checked;
+      });
+      if (dataTable) {
+        // destroy() swaps in a new table built from the initial HTML.
+        dataTable.destroy();
+        table = document.getElementById(table.id);
+      }
+      var body = table.tBodies[0];
+      body.replaceChildren.apply(
+        body,
+        rows.filter(function (row) {
+          return !(row.dataset.class in shown) || shown[row.dataset.class];
+        })
+      );
+      if (window.simpleDatatables) {
+        dataTable = new window.simpleDatatables.DataTable(table, settings);
+      }
+    }
+
+    boxes.forEach(function (box) {
+      box.addEventListener("change", build);
+    });
+    if (filters) {
+      filters.hidden = false;
+    }
+    build();
+  }
+
+  document.querySelectorAll("table[data-table]").forEach(setUp);
+})();

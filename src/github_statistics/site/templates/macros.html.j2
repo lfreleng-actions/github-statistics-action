@@ -1,0 +1,5 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{# SPDX-FileCopyrightText: 2026 The Linux Foundation #}
+{% macro chart_image(chart) %}
+<a class="chart" href="{{ chart.href }}"><img src="{{ chart.src }}" width="{{ chart.width }}" height="{{ chart.height }}" alt="{{ chart.alt }}"{% if chart.lazy %} loading="lazy"{% endif %}></a>
+{% endmacro %}

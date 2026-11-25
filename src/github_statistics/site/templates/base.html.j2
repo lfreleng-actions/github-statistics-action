@@ -1,0 +1,25 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{# SPDX-FileCopyrightText: 2026 The Linux Foundation #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="{{ csp }}">
+<title>{% block title %}GitHub statistics{% endblock %}</title>
+{% block head %}{% endblock %}
+<link rel="stylesheet" href="{{ root }}assets/site.css">
+</head>
+<body>
+<header>
+  <div class="wrap"><a href="{{ root }}index.html">GitHub statistics</a></div>
+</header>
+<main class="wrap">
+{% block main %}{% endblock %}
+</main>
+<footer class="wrap">
+  <p>Generated {{ generated }} by github-statistics {{ version }}.
+  {% block footer %}{% endblock %}</p>
+</footer>
+</body>
+</html>

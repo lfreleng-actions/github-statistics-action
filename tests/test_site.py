@@ -156,7 +156,6 @@ def _pages(site: Path) -> dict[Path, str]:
     return {path: path.read_text(encoding="utf-8") for path in site.rglob("*.html")}
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_site_writes_landing_target_pages_and_assets(tmp_path: Path) -> None:
     site = _site(tmp_path, "acme", "other")
     for name in (".nojekyll", "index.html", "assets/site.css", "assets/site.js"):
@@ -176,7 +175,6 @@ def test_site_writes_landing_target_pages_and_assets(tmp_path: Path) -> None:
     assert "acme/img/workflows-all-1920.png" in sources
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_relative_links_resolve(tmp_path: Path) -> None:
     site = _site(tmp_path, "acme", "other")
     checked = 0
@@ -199,7 +197,6 @@ def test_relative_links_resolve(tmp_path: Path) -> None:
     assert checked > 40
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_external_assets_are_pinned_with_integrity(tmp_path: Path) -> None:
     site = _site(tmp_path, "acme")
     external = 0
@@ -217,7 +214,6 @@ def test_external_assets_are_pinned_with_integrity(tmp_path: Path) -> None:
     assert external == 2
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_pages_carry_no_inline_script_or_style(tmp_path: Path) -> None:
     site = _site(tmp_path, "acme")
     for path, text in _pages(site).items():
@@ -236,7 +232,6 @@ def test_pages_carry_no_inline_script_or_style(tmp_path: Path) -> None:
         assert all(not k.startswith("on") for _, a in page.tags for k in a), path
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_hostile_login_and_repository_are_escaped(tmp_path: Path) -> None:
     _seed(tmp_path / "cache", "acme", HOSTILE_REPO, HOSTILE_LOGIN)
     result = _run(tmp_path, "site", "acme")
@@ -249,7 +244,6 @@ def test_hostile_login_and_repository_are_escaped(tmp_path: Path) -> None:
     assert not any(tag == "img" for tag, _ in _Page(text).tags)
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_target_page_tables_tabs_and_notes(tmp_path: Path) -> None:
     site = _site(tmp_path, "acme")
     text = (site / "acme" / "index.html").read_text(encoding="utf-8")
@@ -274,7 +268,6 @@ def test_target_page_tables_tabs_and_notes(tmp_path: Path) -> None:
     assert not any("checked" in a for a in boxes)
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_missing_charts_and_data_are_named_not_linked(tmp_path: Path) -> None:
     site = _site(tmp_path, "acme", charts=False, export=False)
     text = (site / "acme" / "index.html").read_text(encoding="utf-8")
@@ -284,7 +277,6 @@ def test_missing_charts_and_data_are_named_not_linked(tmp_path: Path) -> None:
     assert "data/" not in text
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_downloads_link_export_documents_alone(tmp_path: Path) -> None:
     _seed(tmp_path / "cache", "acme", "acme/a", "alice")
     assert _run(tmp_path, "export", "acme").exit_code == 0
@@ -299,7 +291,6 @@ def test_downloads_link_export_documents_alone(tmp_path: Path) -> None:
     assert sorted(h[5:] for h in links if h.startswith("data/")) == exported
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_single_target_site(tmp_path: Path) -> None:
     site = _site(tmp_path, "acme")
     assert sorted(p.relative_to(site).as_posix() for p in _pages(site)) == [
@@ -308,7 +299,6 @@ def test_single_target_site(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_footer_date_comes_from_now_and_script_holds_no_data(tmp_path: Path) -> None:
     from github_statistics.config import Config, Target
     from github_statistics.config.models import Window
@@ -344,7 +334,6 @@ def test_footer_date_comes_from_now_and_script_holds_no_data(tmp_path: Path) -> 
     assert "simpleDatatables.DataTable" in script
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_membership_note_follows_the_identity_lists(tmp_path: Path) -> None:
     from github_statistics.config import Config, Identities, Target, resolve_identities
     from github_statistics.config.models import Window
@@ -380,7 +369,6 @@ def test_membership_note_follows_the_identity_lists(tmp_path: Path) -> None:
     assert "If acme is a user rather than an organisation" in text
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_headline_counts_merges_by_deleted_accounts(tmp_path: Path) -> None:
     from github_statistics.store import Item, Store, store_path
 
@@ -409,7 +397,6 @@ def test_headline_counts_merges_by_deleted_accounts(tmp_path: Path) -> None:
     assert "<dt>Pull requests merged</dt><dd>2</dd>" in text
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_scope_rule_names_both_include_and_exclude(tmp_path: Path) -> None:
     from github_statistics.config import Config, Target
     from github_statistics.config.models import Window
@@ -435,7 +422,6 @@ def test_scope_rule_names_both_include_and_exclude(tmp_path: Path) -> None:
         assert "Public repositories of ACME matching a*, except ab;" in text, page
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_scope_rule_for_exact_names_drops_the_toggles(tmp_path: Path) -> None:
     from github_statistics.config import Config, Target
     from github_statistics.config.models import Window
@@ -462,7 +448,6 @@ def test_scope_rule_for_exact_names_drops_the_toggles(tmp_path: Path) -> None:
         assert "left out" not in text, page
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_landing_card_names_each_missing_chart(tmp_path: Path) -> None:
     _seed(tmp_path / "cache", "acme", "acme/a", "alice")
     _charts(tmp_path / "site", "acme")
@@ -476,7 +461,6 @@ def test_landing_card_names_each_missing_chart(tmp_path: Path) -> None:
     assert len(_Page(text).find("img")) == len(METRICS) - 1
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_landing_card_without_the_all_class_names_classes(tmp_path: Path) -> None:
     from github_statistics.config import Config, Target
     from github_statistics.config.models import Window
@@ -504,7 +488,6 @@ def test_landing_card_without_the_all_class_names_classes(tmp_path: Path) -> Non
     assert not _Page(text).find("img")
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_site_command_fails_without_a_store(tmp_path: Path) -> None:
     result = _run(tmp_path, "site", "acme")
     assert result.exit_code == 1
@@ -512,7 +495,6 @@ def test_site_command_fails_without_a_store(tmp_path: Path) -> None:
     assert not (tmp_path / "site").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_site_command_refuses_a_selection_narrower_than_the_store(
     tmp_path: Path,
 ) -> None:
@@ -540,7 +522,6 @@ def test_site_command_refuses_a_selection_narrower_than_the_store(
     assert not (tmp_path / "site").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="site generator not implemented")
 def test_package_holds_every_template_and_asset() -> None:
     from importlib.resources import files
 

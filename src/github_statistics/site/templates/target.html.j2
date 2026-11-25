@@ -1,0 +1,95 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{# SPDX-FileCopyrightText: 2026 The Linux Foundation #}
+{% extends "base.html.j2" %}
+{% from "macros.html.j2" import chart_image %}
+{% block title %}{{ owner }} · GitHub statistics{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ datatables_css_url }}" integrity="{{ datatables_css_sri }}" crossorigin="anonymous">
+<script src="{{ datatables_js_url }}" integrity="{{ datatables_js_sri }}" crossorigin="anonymous" defer></script>
+<script src="{{ root }}assets/site.js" defer></script>
+{% endblock %}
+{% block main %}
+<h1>{{ owner }}</h1>
+<p class="note">Daily activity over {{ window }}.</p>
+<nav aria-label="Sections">
+  {% for metric in metrics %}<a href="#{{ metric.name }}">{{ metric.heading }}</a>
+  {% endfor %}<a href="#contributors">Contributors</a>
+  <a href="#repositories">Repositories</a>
+  <a href="#downloads">Downloads</a>
+</nav>
+{% for metric in metrics %}
+<section class="metric" id="{{ metric.name }}">
+  <h2>{{ metric.heading }}</h2>
+  {% for line in metric.notes %}
+  <p class="note">{{ line }}</p>
+  {% endfor %}
+  <div class="tabs">
+    {% for view in metric.views %}
+    <input type="radio" name="view-{{ metric.name }}" id="tab-{{ view.id }}"{% if loop.first %} checked{% endif %}>
+    <label for="tab-{{ view.id }}">{{ view.label }}</label>
+    {% endfor %}
+    <div>
+      {% for view in metric.views %}
+      <div>
+        {% if view.chart %}
+        {{ chart_image(view.chart) }}
+        {% else %}
+        <p class="missing">No chart for {{ view.label }}: run <code>github-statistics render</code>.</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endfor %}
+<section id="contributors">
+  <h2>Contributors</h2>
+  <fieldset class="filters" data-filter-for="contributors-table" hidden>
+    <legend>Show</legend>
+    {% for actor_class in bot_classes %}
+    <label><input type="checkbox" value="{{ actor_class }}"> {{ class_labels[actor_class] }}s</label>
+    {% endfor %}
+  </fieldset>
+  <div>
+    <table id="contributors-table" class="data" data-table>
+      <thead>
+        <tr><th>Login</th><th>Class</th>{% for column in columns %}<th data-type="number">{{ column | replace("_", " ") }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in contributors %}
+        <tr data-class="{{ row.class }}"><td>{{ row.login }}</td><td><span class="badge">{{ class_labels[row.class] }}</span></td>{% for column in columns %}<td>{{ row.counts[column] }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Members are people whose membership of {{ member_orgs | join(" or ") }} is public on GitHub{% if named_members %}, and the people this site's configuration names as members{% endif %}; everyone else, including members who keep their membership private, appears as an external contributor. If {{ owner }} is a user rather than an organisation, {{ owner }} counts as a member too.</p>
+</section>
+<section id="repositories">
+  <h2>Repositories</h2>
+  <div>
+    <table id="repositories-table" class="data" data-table>
+      <thead>
+        <tr><th>Repository</th>{% for column in repository_columns %}<th data-type="number">{{ column | replace("_", " ") }}</th>{% endfor %}{% for metric in coverage_metrics %}<th data-type="number">coverage {{ metric | replace("_", " ") }} (%)</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in repositories %}
+        <tr><td>{{ row.repo }}</td>{% for column in repository_columns %}<td>{{ row.counts[column] }}</td>{% endfor %}{% for metric in coverage_metrics %}<td>{{ "%.1f" | format(row.coverage[metric] * 100) }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section id="downloads">
+  <h2>Downloads</h2>
+  {% if downloads %}
+  <ul class="downloads">
+    {% for name in downloads %}
+    <li><a href="data/{{ name | urlencode }}">{{ name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="missing">No data files yet: run <code>github-statistics export</code>.</p>
+  {% endif %}
+</section>
+{% endblock %}
+{% block footer %}Window: {{ window }}. Scope: {{ scope_rule }}{% endblock %}

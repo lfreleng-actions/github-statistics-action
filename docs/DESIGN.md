@@ -1405,22 +1405,68 @@ charts per target (three metrics by five views) stay around a minute.
 
 ```text
 site/
+  .nojekyll
   index.html              landing: one card per target with headline
-                          numbers and the three 1920-px charts
+                          numbers and the `all` 1920-px charts
   assets/site.css         own stylesheet, no framework
-  <owner>/index.html      charts (tabs: all / members / external /
-                          our bots / external bots), tables,
-                          coverage note, data downloads
-  <owner>/img/*.png|svg
-  <owner>/data/*.json     daily series, leaderboards, coverage
+  assets/site.js          table set-up, rendered from site.js.j2
+  <owner>/index.html      charts (tabs: everyone / members / external
+                          contributors / our bots / external bots),
+                          coverage notes, tables, data downloads
+  <owner>/img/*.png       written by `render`
+  <owner>/data/*          written by `export`
 ```
 
-Jinja2 templates ship inside the package (`PackageLoader`, as GSR).
-Tables use `simple-datatables` from jsDelivr with the version pinned and
-SRI hashes for both the script and the stylesheet, lifted from GSR's
-constants. The pages load no other third-party asset, and the runner's
-egress allow-list does not change, because the browser, not the runner,
-fetches the script.
+`github-statistics site` opens each store without writing to it,
+as `export` does, builds the series and the two tables of §7.4 (no network, no
+token) and writes the HTML and assets alone. It fails, as `render`
+does, when a store is missing or stale or the repository selection
+drops a repository the store held in scope in the window, and it
+reads every store before it writes a page. The pages link to the
+charts and data files that `render` and `export` wrote; where one is
+absent the page links nothing and says which command to run. The
+downloads link the JSON documents of §8.6 by name, never whatever else
+`data/` holds. The output directory must hold the charts and data of
+the same run; `site` does not check their freshness.
+
+The landing card gives, for the window, pull requests opened and
+merged (both counted by the series' rules, so a deleted author's pull
+requests count; the leaderboard leaves those out), issues opened and
+closed, workflow runs and jobs, the repositories in scope on the last
+day, and the days on which every
+charted metric is complete. A target page has a section per charted
+metric with one tab per view, built from radio inputs and CSS so it
+works without JavaScript; each tab shows the 1920-px derivative with
+its size, descriptive `alt` text and a link to the master, and every
+image but the first carries `loading="lazy"`. A note counts the days
+without data, or with partial data, and for workflows adds that
+GitHub lists runs for about a year. The contributor table starts with the bot classes
+hidden, a checkbox per class showing them; the note beneath it says
+membership means public membership of the `member_orgs`
+organisations, and names the other members §7.1 counts: those the
+`members` list names, and the owner of a target owned by a user.
+The footer gives the generation
+date (the date alone, from the caller's clock), the tool version, the
+window and the scope rule in words; for an `include` of exact names
+the rule lists the names and says the `scan_*` toggles do not apply.
+The landing card shows each charted metric's `all` chart, and names
+each one `render` has not written; when `classes` leaves out `all`,
+it shows none and says to add `all` to `classes`.
+
+Jinja2 templates ship inside the package (`PackageLoader`, as GSR),
+with autoescape on for every `*.html.j2` template; logins and
+repository names come from GitHub and are never marked safe. The
+script is a template too, `site.js.j2`, given constants alone through
+`tojson`: the repository tracks no JavaScript source, and the script
+reads what it needs from the pages' `data-` attributes. Every page
+carries a Content-Security-Policy that allows scripts and styles from
+the page's own origin and jsDelivr and nowhere else, so no script or
+style is inline. Tables use `simple-datatables` from jsDelivr with the version
+pinned and SRI hashes for both the script and the stylesheet, lifted
+from GSR's constants; they stay readable, all rows shown, with
+JavaScript off or the CDN blocked. The pages load no other
+third-party asset, and the runner's egress allow-list does not
+change, because the browser, not the runner, fetches the script.
 
 ### 8.6 Data export
 
