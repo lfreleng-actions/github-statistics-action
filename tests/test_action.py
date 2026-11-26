@@ -201,3 +201,20 @@ def test_scope_leaves_out_run_only_switches(tmp_path: Path) -> None:
     assert "scope" in args
     assert "--refresh" not in args
     assert "--strict" not in args
+
+
+@pytest.mark.xfail(strict=True)
+def test_max_minutes_reaches_the_tool_only_when_set(tmp_path: Path) -> None:
+    """``max_minutes`` becomes ``--max-minutes``; unset, no flag is passed."""
+    assert _action()["inputs"]["max_minutes"]["default"] == ""
+    unset = tmp_path / "unset"
+    unset.mkdir()
+
+    result = _run_script(tmp_path, GHSA_MAX_MINUTES="45")
+    bare = _run_script(unset)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = (tmp_path / "args").read_text(encoding="utf-8").splitlines()
+    assert args[args.index("--max-minutes") + 1] == "45"
+    assert bare.returncode == 0, bare.stdout + bare.stderr
+    assert "--max-minutes" not in (unset / "args").read_text(encoding="utf-8")

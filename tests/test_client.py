@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import httpx
@@ -433,6 +434,114 @@ def test_budget_reserve_and_exhaustion() -> None:
     budget.settle_graphql(4, 5)
     assert budget.graphql_left == 0
     assert budget.graphql_exhausted
+
+
+@pytest.mark.xfail(strict=True)
+def test_budget_deadline_spends_like_an_empty_count_once_passed() -> None:
+    """Spending works before the deadline and is refused from it on."""
+    budget_type: Any = importlib.import_module("github_statistics.client").Budget
+
+    now = [0.0]
+    budget = budget_type(deadline=60.0, clock=lambda: now[0])
+    assert budget.try_spend_rest()
+    assert budget.try_spend_graphql(1)
+    assert not budget.timed_out
+
+    now[0] = 60.0
+
+    assert budget.timed_out
+    assert not budget.try_spend_rest()
+    assert not budget.try_spend_graphql(1)
+    assert budget.rest_exhausted
+    assert budget.graphql_exhausted
+    assert (budget.rest_spent, budget.graphql_spent) == (1, 1)
+    assert not budget_type(clock=lambda: 1e12).timed_out
+
+
+@pytest.mark.xfail(strict=True)
+def test_budget_records_whether_a_count_stopped_it_before_the_deadline() -> None:
+    """A count found spent before the deadline is a stop; one after it is not."""
+    budget_type: Any = importlib.import_module("github_statistics.client").Budget
+
+    now = [0.0]
+    timed = budget_type(deadline=60.0, clock=lambda: now[0])
+    counted = budget_type(rest=1, deadline=60.0, clock=lambda: now[0])
+    assert counted.try_spend_rest()
+    assert not counted.stopped_by_count
+    assert counted.rest_exhausted
+    assert counted.stopped_by_count
+
+    now[0] = 60.0
+
+    assert timed.timed_out
+    timed.observe(0)
+    timed.exhaust_graphql()
+    assert timed.rest_exhausted
+    assert timed.graphql_exhausted
+    assert not timed.stopped_by_count
+    assert counted.stopped_by_count
+
+
+@pytest.mark.xfail(strict=True)
+async def test_a_queued_query_holding_every_point_is_not_a_count_stop() -> None:
+    """Points a query holds, then gives back unsent at the deadline, stop nothing."""
+    import asyncio
+
+    from github_statistics.client import BudgetExhaustedError, graphql
+
+    budget_type: Any = importlib.import_module("github_statistics.client").Budget
+    now = [0.0]
+    budget = budget_type(graphql_points=2, deadline=60.0, clock=lambda: now[0])
+
+    with respx.mock:
+        route = respx.post(f"{API}/graphql").respond(200, json={"data": {}})
+        async with _transport(Sleeper(), budget=budget, concurrency=1) as transport:
+            async with transport._semaphore:
+                queued = asyncio.ensure_future(
+                    graphql(transport, "query { x }", cost_estimate=2)
+                )
+                await asyncio.sleep(0)
+                assert budget.graphql_spent == 2
+                now[0] = 60.0
+            with pytest.raises(BudgetExhaustedError):
+                await queued
+    assert route.call_count == 0
+    assert budget.graphql_spent == 0
+    assert not budget.stopped_by_count
+
+
+@pytest.mark.xfail(strict=True, reason="time limit not implemented yet")
+async def test_graphql_waiting_or_retrying_past_the_deadline_is_not_sent() -> None:
+    """A query queued or retried past the deadline stays unsent."""
+    import asyncio
+
+    from github_statistics.client import Budget, BudgetExhaustedError, graphql
+
+    now = [0.0]
+    budget = Budget(graphql_points=10, deadline=60.0, clock=lambda: now[0])
+
+    def fail_then_time_out(_request: httpx.Request) -> httpx.Response:
+        now[0] = 60.0
+        return httpx.Response(502)
+
+    with respx.mock:
+        route = respx.post(f"{API}/graphql").mock(side_effect=fail_then_time_out)
+        async with _transport(Sleeper(), budget=budget, concurrency=1) as transport:
+            with pytest.raises(BudgetExhaustedError):
+                await graphql(transport, "query { x }", cost_estimate=1)
+            assert route.call_count == 1
+            now[0] = 0.0
+            async with transport._semaphore:
+                queued = asyncio.ensure_future(
+                    graphql(transport, "query { x }", cost_estimate=2)
+                )
+                await asyncio.sleep(0)
+                assert budget.graphql_spent == 3
+                now[0] = 60.0
+            with pytest.raises(BudgetExhaustedError):
+                await queued
+    assert route.call_count == 1
+    assert budget.graphql_spent == 1
 
 
 async def test_budget_seeded_free_and_charged_per_request() -> None:

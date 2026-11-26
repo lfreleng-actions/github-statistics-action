@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 import logging
 from pathlib import Path
@@ -415,6 +416,21 @@ def test_resolve_applies_and_validates_overrides() -> None:
     )
     with pytest.raises(ConfigError, match=r"window\.days"):
         resolve(config_data=raw, overrides=Overrides(days=3))
+
+
+@pytest.mark.xfail(strict=True)
+def test_budget_minutes_validates_and_the_flag_overrides_it() -> None:
+    """``budget.minutes`` is unset by default, at least 1, and the flag wins."""
+    config: Any = importlib.import_module("github_statistics.config")
+
+    assert config.loads(_raw()).budget.minutes is None
+    assert config.loads(_raw(budget={"minutes": 30})).budget.minutes == 30
+    with pytest.raises(config.ConfigError, match=r"budget\.minutes"):
+        config.loads(_raw(budget={"minutes": 0}))
+    overrides = config.Overrides(max_minutes=5)
+    raw = _raw(budget={"minutes": 30})
+    resolved = config.resolve(config_data=raw, overrides=overrides).config
+    assert resolved.budget.minutes == 5
 
 
 @pytest.mark.parametrize(
