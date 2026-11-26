@@ -912,14 +912,21 @@ default, and each read still runs up to the present:
 4. **Enrichment** of new and updated pull requests (reviews, mergers,
    closers) and new runs (job counts) by GraphQL batches; cheap, and
    bounded by the day's activity. Items enter enrichment once their
-   listing has stored them, so the next run enriches the items a first
-   sync stores in backfill.
+   listing has stored them, so step 6 enriches the items a first sync
+   stores in backfill.
 5. **Backfill**: the first item sync of each repository with no item
    watermark yet, then the oldest uncovered slice of the window for
    any repository whose `oldest` for runs has not reached the window
    start, newest slice first, until the budget runs out or coverage
    completes.
-6. **Sweep** for late re-runs (§6.4), where due, for each repository
+6. **Enrichment of the backfill**: step 4 again, once every backfill
+   listing has ended and before the sweep, over the items of the
+   repositories step 5 gave a first item sync, then the job counts of
+   those whose run backfill stored runs. A run whose backfill stored
+   nothing skips it, so a warm day costs nothing extra. It runs even
+   when step 5 spent the REST budget, since GraphQL draws on its own
+   pool.
+7. **Sweep** for late re-runs (§6.4), where due, for each repository
    whose recent runs step 3 read in full.
 
 A disabled metric's collectors do not run. A spent budget, or a rate
@@ -1004,9 +1011,9 @@ most the queries in flight. A response that carries no core count leaves
 the observed one unchanged, so while GitHub sends none, `budget.rest`
 alone bounds the run; exactness beyond that is a non-goal. A run that
 exhausts its budget exits zero with a notice; coverage says what
-remains. Steps 3 and 4 are never starved by step 5,
-so the most recent days are always current even while history is still
-filling in.
+remains. Steps 3 and 4 are still never starved by step 5, which
+step 6 follows rather than replaces, so the most recent days are always
+current even while history is still filling in.
 
 Everything is idempotent: writes are `INSERT OR REPLACE` keyed by GitHub
 ids, watermarks advance inside the same transaction that stores the page

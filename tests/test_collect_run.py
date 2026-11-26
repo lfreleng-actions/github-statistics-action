@@ -69,6 +69,7 @@ class _Fakes:
         self.unreadable = unreadable
         self.spend = 0
         self.stop: str | None = None
+        self.backfilled = 1
         self.window_starts: list[Any] = []
         run = _run()
         fakes = self
@@ -76,6 +77,7 @@ class _Fakes:
         class RunSync:
             def __init__(self, _t: Any, _s: Any, key: str, **_kw: Any) -> None:
                 self.key = key
+                self.runs = 0
 
             async def guarded(self, phase: Any) -> bool:
                 await phase()
@@ -86,13 +88,16 @@ class _Fakes:
 
             async def backfill(self) -> None:
                 fakes.calls.append(("runs.backfill", self.key))
+                self.runs += fakes.backfilled
 
             def result(self) -> Any:
                 from github_statistics.collect import RunSyncResult
 
                 status = fakes.unreadable.get("runs")
                 stalled = fakes.unreadable.get("stalled") == self.key
-                return RunSyncResult(self.key, 0, 0, True, False, status, stalled)
+                return RunSyncResult(
+                    self.key, self.runs, 0, True, False, status, stalled
+                )
 
         monkeypatch.setattr(run, "_RunSync", RunSync)
         for name in (
@@ -169,7 +174,7 @@ def _watermark(store: Any, key: str) -> None:
 
 
 async def test_runs_the_steps_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Scope, members, incremental, enrichment, backfill, then the sweep."""
+    """Scope, members, incremental, enrichment, backfill, enrichment, sweep."""
     store = _store()
     _watermark(store, "acme/a")
     fakes = _Fakes(monkeypatch, _scope("a", "b"))
@@ -189,6 +194,8 @@ async def test_runs_the_steps_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
         ("items.end", "acme/b"),
         ("runs.backfill", "acme/a"),
         ("runs.backfill", "acme/b"),
+        ("enrich_items", "acme/b"),
+        ("enrich_jobs", "acme/a", "acme/b"),
         ("sweep", "acme/a"),
         ("sweep", "acme/b"),
     ]
@@ -227,6 +234,57 @@ async def test_a_small_budget_still_runs_incremental_and_enrichment(
     assert "enrich_items" in names
     assert "enrich_jobs" in names
     assert result.exhausted == "incremental"
+
+
+async def test_a_first_sync_enriches_its_items_in_the_same_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Items a repository's first sync stores are enriched before the run ends."""
+    store = _store()
+    fakes = _Fakes(monkeypatch, _scope("a"))
+
+    await _collect(store, _config(workflows=False))
+
+    assert fakes.calls[-3:] == [
+        ("items.start", "acme/a"),
+        ("items.end", "acme/a"),
+        ("enrich_items", "acme/a"),
+    ]
+
+
+async def test_a_warm_run_enriches_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With nothing to backfill, each enrichment runs once."""
+    store = _store()
+    _watermark(store, "acme/a")
+    fakes = _Fakes(monkeypatch, _scope("a"))
+    fakes.backfilled = 0
+
+    await _collect(store)
+
+    names = [call[0] for call in fakes.calls]
+    assert names.count("enrich_items") == 1
+    assert names.count("enrich_jobs") == 1
+
+
+async def test_a_budget_spent_in_backfill_still_enriches_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A REST budget the backfill spends leaves the GraphQL pass to run."""
+    from github_statistics.client import Budget
+
+    store = _store()
+    fakes = _Fakes(monkeypatch, _scope("a"))
+    fakes.spend = 5
+
+    result = await _collect(store, budget=Budget(rest=5))
+
+    assert result.exhausted == "backfill"
+    backfill = fakes.calls.index(("runs.backfill", "acme/a"))
+    assert fakes.calls[backfill + 1 :] == [
+        ("enrich_items", "acme/a"),
+        ("enrich_jobs", "acme/a"),
+        ("sweep", "acme/a"),
+    ]
 
 
 async def test_a_spent_scope_budget_stops_cleanly(
