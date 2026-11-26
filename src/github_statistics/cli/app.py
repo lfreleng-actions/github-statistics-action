@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 import time
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -25,6 +28,10 @@ from .site import site
 DERIVATIVE_WIDTH = 1920
 DEMO_MIN_DAYS = 7
 DEMO_MAX_DAYS = 730
+LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+LOG_HANDLER = "github-statistics"
+# httpx logs every request URL at INFO; these speak only at DEBUG.
+QUIET_LOGGERS = ("httpx", "httpcore", "matplotlib")
 
 app = typer.Typer(
     name="github-statistics",
@@ -49,6 +56,39 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+class LogLevel(StrEnum):
+    """The levels ``--log-level`` accepts."""
+
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+def configure_logging(level: LogLevel) -> None:
+    """Log to stderr at ``level``, with UTC timestamps.
+
+    A handler is added only when the root logger has none. Third-party
+    loggers stay at WARNING unless ``level`` is DEBUG; the handler takes
+    ``level`` too, since their records skip the root logger's own level.
+    """
+    numeric = logging.getLevelName(level.value.upper())
+    handler = logging.StreamHandler(sys.stderr)
+    handler.set_name(LOG_HANDLER)
+    formatter = logging.Formatter(LOG_FORMAT)
+    formatter.converter = time.gmtime
+    handler.setFormatter(formatter)
+    logging.basicConfig(level=numeric, handlers=[handler])
+    root = logging.getLogger()
+    root.setLevel(numeric)
+    for installed in root.handlers:
+        if installed.get_name() == LOG_HANDLER:
+            installed.setLevel(numeric)
+    quiet = logging.DEBUG if level is LogLevel.DEBUG else logging.WARNING
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(quiet)
+
+
 @app.callback()
 def main(
     version: bool = typer.Option(
@@ -59,8 +99,16 @@ def main(
         callback=_version_callback,
         is_eager=True,
     ),
+    log_level: LogLevel = typer.Option(
+        LogLevel.INFO,
+        "--log-level",
+        envvar="GHS_LOG_LEVEL",
+        case_sensitive=False,
+        help="Level of the progress log written to stderr.",
+    ),
 ) -> None:
     """Daily, visual activity statistics for GitHub organisations and repositories."""
+    configure_logging(log_level)
 
 
 def _yesterday() -> date:

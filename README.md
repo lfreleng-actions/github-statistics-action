@@ -298,6 +298,16 @@ starts, as a spent budget does: the run exits 0 and still renders,
 exports and builds the site, and the next run resumes. It overrides
 `budget.minutes`, which sets no time limit by default.
 
+### Logging
+
+Every command logs its progress to stderr at `INFO`: each `collect`
+step as it starts and ends, with the REST requests and GraphQL points
+spent and left, and a line per repository per step with what it read
+and stored. Timestamps are in UTC. Set `--log-level` (`debug`, `info`,
+`warning` or `error`) before the command, or `GHS_LOG_LEVEL`; the
+option wins. Log lines never carry a token. The summary tables stay on
+stdout.
+
 ## Development
 
 The project uses [uv](https://docs.astral.sh/uv/) and needs Python
