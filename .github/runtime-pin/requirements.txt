@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Linux Foundation
+
+# The github-statistics release the action installs when neither
+# tool_version nor local source applies. Dependabot's pip ecosystem
+# manages this pin (.github/dependabot.yml); review each bump as a
+# pull request rather than editing it by hand.
+github-statistics==0.1.0
