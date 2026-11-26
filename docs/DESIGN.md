@@ -645,7 +645,20 @@ no item that shares the boundary timestamp, whether `since` returns
 items updated at the timestamp given or after it alone. The upsert
 keeps the enrichment columns (§6.3). The sync follows `next` links
 alone and counts the listing read to its end when they stop, so it
-does not detect or recover a listing GitHub truncates.
+does not detect or recover a listing GitHub truncates. Reading every
+item rests on those links being cursors. Measured on 2026-11-22, each
+`next` link of this listing carries an `after` cursor beside a `page`
+number; the cursor names the `updated_at` and `id` of the last item
+returned, and it, not `page`, decides the next page, including inside
+a group of items sharing one second. The sync so reads the listing by
+key: an item updated during the read reappears at the end, and no
+unread item moves in front of the cursor. Were the links offsets, an
+item updated between two page requests would move every item behind it
+up one place, and the one crossing a page boundary would land on a page
+already read, where the sync never stores it. A host whose `next` link carries no
+`after` logs one warning per repository per sync naming the
+repository, and the sync carries on with its coverage unchanged; it
+does not page by timestamp to close that gap.
 
 Coverage is all-or-nothing per sync: an item read late in the listing
 can carry an event from any earlier day, so a partly read listing
