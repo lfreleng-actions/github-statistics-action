@@ -226,6 +226,8 @@ jobs:
           output_dir: site
           cache_dir: ${{ steps.store-key.outputs.cache_dir }}
           refresh: ${{ inputs.refresh }}
+          # 20 minutes under the job timeout for the steps after collection
+          max_minutes: "40"
           use_local_source: ${{ inputs.use_local_source }}
           org_bots: ${{ vars.GHS_ORG_BOTS }}
           external_bots: ${{ vars.GHS_EXTERNAL_BOTS }}

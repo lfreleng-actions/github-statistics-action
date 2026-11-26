@@ -5,4 +5,4 @@
 # tool_version nor local source applies. Dependabot's pip ecosystem
 # manages this pin (.github/dependabot.yml); review each bump as a
 # pull request rather than editing it by hand.
-github-statistics==0.1.0
+github-statistics==0.2.0

@@ -1710,7 +1710,10 @@ Jobs:
    `403`s on one repository) does not go unnoticed for a week.
 
 Timeout 60 minutes for `build`: the budget, not the clock, bounds a cold
-start, but a budgeted run must have room to spend it.
+start, but a budgeted run must have room to spend it. The run step sets
+`max_minutes: "40"`, so collection stops 20 minutes under the job
+timeout and render, export, the site, saving the store and the Pages
+artifact still run; a job cancelled by its timeout would lose them.
 
 ### 9.3 Persisting the store without a data repository
 
