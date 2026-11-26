@@ -458,6 +458,26 @@ async def test_a_rest_client_error_in_the_scope_read_propagates(
         await _collect(store)
 
 
+@pytest.mark.xfail(strict=True)
+async def test_the_summary_names_a_repository_purged_as_left_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A departed repository purged as incomplete reports why it went."""
+    import dataclasses
+
+    from github_statistics.scope import Dropped
+
+    store = _store()
+    store.enter_scope("acme/old", WINDOW)
+    scope = dataclasses.replace(_scope("a"), dropped=(Dropped("old", "archived"),))
+    _Fakes(monkeypatch, scope)
+
+    result = await _collect(store)
+
+    assert result.dropped == {"acme/old": "archived, purged: left incomplete"}
+    assert "acme/old" not in store.stored_repositories()
+
+
 def _real_resolve_scope() -> Any:
     """The scope resolver itself, unstubbed."""
     from github_statistics.scope import resolve_scope
