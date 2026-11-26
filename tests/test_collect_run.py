@@ -177,7 +177,6 @@ def _watermark(store: Any, key: str) -> None:
     store.set_sync_state(SyncState(key, "items", watermark=NOW, oldest=NOW))
 
 
-@pytest.mark.xfail(strict=True)
 async def test_runs_the_steps_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """Scope, members, items, runs, enrichment, backfill, job counts, sweep."""
     store = _store()
@@ -205,7 +204,6 @@ async def test_runs_the_steps_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_cold_store_lists_every_item_before_reading_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -225,7 +223,6 @@ async def test_a_cold_store_lists_every_item_before_reading_runs(
     assert result.exhausted == "incremental"
 
 
-@pytest.mark.xfail(strict=True)
 async def test_the_first_enrichment_sees_items_without_a_watermark(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -307,7 +304,6 @@ async def test_a_warm_run_enriches_once(monkeypatch: pytest.MonkeyPatch) -> None
     assert names.count("enrich_jobs") == 1
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_budget_spent_in_backfill_still_enriches_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -378,7 +374,6 @@ async def test_a_collector_stop_reports_its_step(
     assert ("enrich_items", "acme/a") in fakes.calls
 
 
-@pytest.mark.xfail(strict=True)
 async def test_refresh_clears_watermarks_and_coverage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
