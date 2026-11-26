@@ -118,6 +118,33 @@ class AggregateStore(ActivityStore):
         )
         return [(repo, codec.parse_day(day)) for repo, day in rows]
 
+    def run_job_counts(
+        self, from_day: date, to_day: date
+    ) -> list[tuple[str | None, str | None, str | None, int, int]]:
+        """Concluded runs in scope, and those with a job count, per actor.
+
+        Rows are ``(login, type, automation, counted, concluded)``; a run
+        of an automation event carries no login, as in `run_day_counts`.
+        Job counts are read only once a run concludes (design §6.4), so a
+        run still in progress counts in neither.
+        """
+        low, high = codec.day_bounds(from_day, to_day)
+        rows = self._connection.execute(
+            f"SELECT CASE WHEN {_AUTOMATION} THEN NULL ELSE actor END AS login,"
+            f" CASE WHEN {_AUTOMATION} THEN NULL ELSE actor_type END AS login_type,"
+            f" CASE WHEN {_AUTOMATION} THEN event END AS automation,"
+            " COUNT(jobs), COUNT(*) FROM runs"
+            " WHERE conclusion IS NOT NULL AND created_at >= ? AND created_at < ?"
+            f" AND {_in_scope('runs', 'created_at')}"
+            " GROUP BY login, login_type, automation"
+            " ORDER BY login, login_type, automation",
+            (*(AUTOMATION_EVENTS * 3), low, high),
+        )
+        return [
+            (login, account_type, automation, counted, concluded)
+            for login, account_type, automation, counted, concluded in rows
+        ]
+
     def actors(self) -> list[tuple[str, str | None]]:
         """Every distinct ``(login, type)`` the store credits anything to, sorted.
 

@@ -116,11 +116,11 @@ def _charts(out: Path, owner: str) -> None:
             Image.new("RGB", (16, 9)).save(img / f"{metric}-{view}-1920.png")
 
 
-def _run(tmp_path: Path, command: str, *orgs: str) -> Any:
-    """Run ``command`` over ``orgs`` for the ten days to `UNTIL`."""
+def _run(tmp_path: Path, command: str, *orgs: str, extra: tuple[str, ...] = ()) -> Any:
+    """Run ``command`` over ``orgs`` for the ten days to `UNTIL`, then ``extra``."""
     from github_statistics.cli import app
 
-    args = [command]
+    args = [command, *extra]
     for org in orgs:
         args += ["--org", org]
     args += [
@@ -532,3 +532,209 @@ def test_package_holds_every_template_and_asset() -> None:
         assert (package / "templates" / name).is_file(), name
     for name in build.ASSETS:
         assert (package / "assets" / name).is_file(), name
+
+
+def _coverage_pages(
+    tmp_path: Path,
+    coverage: dict[str, str],
+    *,
+    horizon: date | None = None,
+    job_runs: tuple[int, int] | None = None,
+    runs_partial: bool | None = None,
+    charts: tuple[str, ...] = (),
+) -> tuple[str, str]:
+    """The landing and target pages of a ten-day series with ``coverage``.
+
+    ``coverage`` gives each charted metric's grades, one letter a day:
+    ``c`` complete, ``p`` partial, ``n`` none. Every series counts one
+    a day in every view; ``charts`` names the chart stems to stand in.
+    """
+    from html import unescape
+
+    from github_statistics.config import Config, Target
+    from github_statistics.config.models import Window
+    from github_statistics.render.charts import VIEW_LABELS
+    from github_statistics.render.model import Coverage
+    from github_statistics.series import TargetSeries
+    from github_statistics.series.daily import SERIES, window
+    from github_statistics.site import SiteTarget, build_site
+
+    grades = {"c": Coverage.COMPLETE, "p": Coverage.PARTIAL, "n": Coverage.NONE}
+    days = window(10, UNTIL)
+    series = TargetSeries(
+        owner="acme",
+        days=days,
+        counts={
+            (metric, key, view): (1,) * len(days)
+            for metric in coverage
+            for key in SERIES[metric]
+            for view in VIEW_LABELS
+        },
+        coverage={
+            metric: tuple(grades[letter] for letter in letters)
+            for metric, letters in coverage.items()
+        },
+        repositories=(1,) * len(days),
+        unclassified_bots=(),
+    )
+    target = Target("acme")
+    config = Config(targets=(target,), window=Window(days=10))
+    out = tmp_path / "out"
+    if charts:
+        from PIL import Image
+
+        (out / "acme" / "img").mkdir(parents=True)
+        for stem in charts:
+            Image.new("RGB", (32, 18)).save(out / "acme" / "img" / f"{stem}.png")
+    site = SiteTarget(
+        target,
+        series,
+        [],
+        [],
+        10,
+        runs_horizon=horizon,
+        job_runs=job_runs,
+        runs_partial=runs_partial,
+    )
+    build_site([site], config, out, now=NOW)
+    landing, page = (
+        unescape((out / name).read_text(encoding="utf-8"))
+        for name in ("index.html", "acme/index.html")
+    )
+    return landing, page
+
+
+def test_card_and_page_show_coverage_per_metric(tmp_path: Path) -> None:
+    pages = _coverage_pages(
+        tmp_path,
+        {"pull_requests": "c" * 10, "issues": "c" * 10, "workflows": "nnnn" + "p" * 6},
+        horizon=date(2026, 3, 5),
+    )
+    for text in pages:
+        assert "<li>Pull requests: 10 of 10 days complete</li>" in text
+        assert "<li>Issues: 10 of 10 days complete</li>" in text
+        assert (
+            "<li>Workflows: 0 of 6 days complete"
+            " (4 days before GitHub's run history)</li>"
+        ) in text
+        assert "Days covered" not in text
+    assert "<dt>Pull requests opened</dt><dd>10</dd>" in pages[0]
+    assert "<dt>Workflow runs</dt><dd>at least 10</dd>" in pages[0]
+
+
+def test_jobs_say_how_many_runs_they_were_counted_for(tmp_path: Path) -> None:
+    coverage = {"workflows": "c" * 10}
+    stems = ("workflows-all", "workflows-member")
+    partial, _ = _coverage_pages(
+        tmp_path / "partial", coverage, job_runs=(3, 8), charts=stems
+    )
+    complete, _ = _coverage_pages(tmp_path / "complete", coverage, job_runs=(8, 8))
+    assert "<dt>Jobs</dt><dd>10 (counted for 3 of 8 runs)</dd>" in partial
+    assert "<dt>Workflow runs</dt><dd>10</dd>" in partial
+    assert "10 runs, 10 jobs (counted for 3 of 8 runs)" in partial
+    assert "<dt>Jobs</dt><dd>10</dd>" in complete
+    _, page = _coverage_pages(
+        tmp_path / "page", coverage, job_runs=(3, 8), charts=stems
+    )
+    assert "10 runs, at least 10 jobs" in page
+
+
+def test_counted_jobs_are_a_lower_bound_only_where_runs_are(tmp_path: Path) -> None:
+    coverage = {"workflows": "c" * 9 + "p"}
+    counted, _ = _coverage_pages(
+        tmp_path / "counted", coverage, job_runs=(8, 8), runs_partial=False
+    )
+    assert "<dt>Jobs</dt><dd>10</dd>" in counted
+    assert "<dt>Workflow runs</dt><dd>at least 10</dd>" in counted
+    missing, _ = _coverage_pages(
+        tmp_path / "missing", coverage, job_runs=(8, 8), runs_partial=True
+    )
+    assert "<dt>Jobs</dt><dd>at least 10</dd>" in missing
+
+
+def test_a_metric_with_a_partial_day_shows_lower_bounds(tmp_path: Path) -> None:
+    card, _ = _coverage_pages(
+        tmp_path, {"pull_requests": "c" * 9 + "p", "issues": "c" * 10}
+    )
+    assert "<dt>Pull requests opened</dt><dd>at least 10</dd>" in card
+    assert "<dt>Pull requests merged</dt><dd>at least 10</dd>" in card
+    assert "<dt>Issues opened</dt><dd>10</dd>" in card
+    assert "<li>Pull requests: 9 of 10 days complete</li>" in card
+
+
+def test_no_horizon_note_without_workflows(tmp_path: Path) -> None:
+    pages = _coverage_pages(
+        tmp_path,
+        {"pull_requests": "c" * 10, "issues": "c" * 10},
+        horizon=date(2026, 3, 5),
+    )
+    for text in pages:
+        assert "run history" not in text
+        assert "<li>Issues: 10 of 10 days complete</li>" in text
+
+
+def test_site_command_reads_the_horizon_and_job_counts(tmp_path: Path) -> None:
+    from github_statistics.store import Run, Store, store_path
+
+    def run(run_id: int, actor: str, event: str, jobs: int | None) -> Run:
+        return Run(
+            id=run_id,
+            node_id=f"WFR_{run_id}",
+            repo="acme/a",
+            workflow_path=".github/workflows/ci.yaml",
+            event=event,
+            status="completed",
+            conclusion="success",
+            created_at=_at(2),
+            actor=actor,
+            actor_type="User",
+            attempt=1,
+            jobs=jobs,
+        )
+
+    _seed(tmp_path / "cache", "acme", "acme/a", "alice")
+    with Store(store_path(tmp_path / "cache", "api.github.com", "acme")) as store:
+        store.upsert_runs(
+            [
+                run(1, "alice", "push", None),
+                run(2, "Spam", "push", None),
+                run(3, "spam", "schedule", 2),
+            ]
+        )
+    result = _run(tmp_path, "site", "acme", extra=("--ignore-logins", "spam"))
+    assert result.exit_code == 0, result.output
+    text = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    assert "<dt>Jobs</dt><dd>2 (counted for 1 of 2 runs)</dd>" in text
+    assert "Workflows: 0 of 9 days complete (1 day before GitHub" in text
+
+
+def test_site_command_gives_plain_jobs_when_only_ignored_runs_lack_counts(
+    tmp_path: Path,
+) -> None:
+    from github_statistics.collect import RUNS_METRIC
+    from github_statistics.store import Run, Store, store_path
+
+    def run(run_id: int, actor: str, jobs: int | None) -> Run:
+        return Run(
+            id=run_id,
+            node_id=f"WFR_{run_id}",
+            repo="acme/a",
+            workflow_path=".github/workflows/ci.yaml",
+            event="push",
+            status="completed",
+            conclusion="success",
+            created_at=_at(2),
+            actor=actor,
+            actor_type="User",
+            attempt=1,
+            jobs=jobs,
+        )
+
+    _seed(tmp_path / "cache", "acme", "acme/a", "alice")
+    with Store(store_path(tmp_path / "cache", "api.github.com", "acme")) as store:
+        store.add_coverage("acme/a", RUNS_METRIC, date(2026, 3, 1), date(2026, 3, 5))
+        store.upsert_runs([run(1, "alice", 3), run(2, "spam", None)])
+    result = _run(tmp_path, "site", "acme", extra=("--ignore-logins", "spam"))
+    assert result.exit_code == 0, result.output
+    text = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    assert "<dt>Jobs</dt><dd>3</dd>" in text

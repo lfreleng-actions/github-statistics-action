@@ -62,6 +62,48 @@ def _merged(
     )
 
 
+def _job_runs(
+    store: Store,
+    owner: str,
+    days: tuple[date, ...],
+    identities: ResolvedIdentities,
+) -> tuple[int, int]:
+    """``(counted, concluded)`` runs over ``days`` the jobs total counts.
+
+    Classed as the daily series classes them: an ignored login is left
+    out, and a scheduled or dynamic run counts whatever its actor.
+    """
+    from github_statistics.series.actors import classify, public_members
+
+    members = public_members(store, identities, owner=owner)
+    counted = concluded = 0
+    for login, account_type, automation, with_jobs, runs in store.run_job_counts(
+        days[0], days[-1]
+    ):
+        if (
+            automation is None
+            and classify(login, account_type, identities, members) is None
+        ):
+            continue
+        counted += with_jobs
+        concluded += runs
+    return counted, concluded
+
+
+def _runs_partial(store: Store, owner: str, days: tuple[date, ...]) -> bool:
+    """Whether a day of ``days`` lacks some in-scope repository's runs.
+
+    Graded as the daily series grades workflows, but leaving unread job
+    counts aside: those `_job_runs` accounts for.
+    """
+    from github_statistics.render.model import Coverage
+    from github_statistics.series.coverage import WORKFLOW_OUTCOMES, daily_coverage
+
+    scope = [store.in_scope(day) for day in days]
+    grades = daily_coverage(store, owner, [WORKFLOW_OUTCOMES], days, scope)
+    return Coverage.PARTIAL in grades[WORKFLOW_OUTCOMES]
+
+
 def site_targets(
     resolution: Resolution, targets: Sequence[Target], *, until: date
 ) -> list[SiteTarget]:
@@ -72,6 +114,7 @@ def site_targets(
     exit `fail` builds.
     """
     # Imported here so other commands start without loading matplotlib.
+    from github_statistics.collect import runs_horizon
     from github_statistics.series import (
         build_leaderboard,
         build_repositories,
@@ -103,6 +146,9 @@ def site_targets(
                     store, config, target, until=until, identities=identities
                 )
                 merged = _merged(store, target.owner, series.days, identities)
+                horizon = runs_horizon(store, target.owner)
+                job_runs = _job_runs(store, target.owner, series.days, identities)
+                runs_partial = _runs_partial(store, target.owner, series.days)
         except sqlite3.DatabaseError as exc:
             raise fail(f"cannot read the store at {path}: {exc}") from None
         except StaleStoreError:
@@ -116,7 +162,17 @@ def site_targets(
                 " selection into its own --cache-dir"
             )
         built.append(
-            SiteTarget(target, series, contributors, repositories, merged, identities)
+            SiteTarget(
+                target,
+                series,
+                contributors,
+                repositories,
+                merged,
+                identities,
+                runs_horizon=horizon,
+                job_runs=job_runs,
+                runs_partial=runs_partial,
+            )
         )
     return built
 

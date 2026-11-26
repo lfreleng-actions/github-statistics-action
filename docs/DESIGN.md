@@ -1524,29 +1524,41 @@ downloads link the JSON documents of §8.6 by name, never whatever else
 `data/` holds. The output directory must hold the charts and data of
 the same run; `site` does not check their freshness.
 
-The landing card gives, for the window, pull requests opened and
-merged (both counted by the series' rules, so a deleted author's pull
-requests count; the leaderboard leaves those out), issues opened and
-closed, workflow runs and jobs, the repositories in scope on the last
-day, and the days on which every
-charted metric is complete. A target page has a section per charted
-metric with one tab per view, built from radio inputs and CSS so it
-works without JavaScript; each tab shows the 1920-px derivative with
-its size, descriptive `alt` text and a link to the master, and every
-image but the first carries `loading="lazy"`. A note counts the days
-without data, or with partial data, and for workflows adds that
-GitHub lists runs for about a year. The contributor table starts with the bot classes
-hidden, a checkbox per class showing them; the note beneath it says
-membership means public membership of the `member_orgs`
-organisations, and names the other members §7.1 counts: those the
-`members` list names, and the owner of a target owned by a user.
-The footer gives the generation
-date (the date alone, from the caller's clock), the tool version, the
-window and the scope rule in words; for an `include` of exact names
-the rule lists the names and says the `scan_*` toggles do not apply.
-The landing card shows each charted metric's `all` chart, and names
-each one `render` has not written; when `classes` leaves out `all`,
-it shows none and says to add `all` to `classes`.
+The landing card gives, for the window, pull requests opened and merged
+(both counted by the series' rules, so a deleted author's pull requests
+count; the leaderboard leaves those out), issues opened and closed,
+workflow runs and jobs, and the repositories in scope on the last day. A
+total of a metric with any partial day in the window reads `at least N`.
+Jobs, while some concluded run in the window has no job count yet
+(§6.4), read `N (counted for X of Y runs)`, X and Y the concluded runs
+with a job count and every concluded run, among the runs the total
+counts (none by an ignored login, §7.3); once each run has its count
+they read as the plain total, or `at least N` while a day lacks some
+repository's runs, a run the total leaves out lacking a count or not.
+Chart `alt` text words its totals the same
+way, jobs in a view other than `all` reading `at least`, as the run
+counts span every class. Beneath the numbers, the card and the head of
+the target page give one coverage line per charted metric, `Pull
+requests: 365 of 365 days complete`. For a run metric the count leaves
+out the days before the runs horizon, which can never be complete, and
+says so: `Workflows: 0 of 324 days complete (41 days before GitHub's run
+history)`. A target page has a section per charted metric with one tab
+per view, built from radio inputs and CSS so it works without
+JavaScript; each tab shows the 1920-px derivative with its size,
+descriptive `alt` text and a link to the master, and every image but the
+first carries `loading="lazy"`. A note counts the days without data, or
+with partial data, and for workflows adds that GitHub lists runs for
+about a year. The contributor table starts with the bot classes hidden,
+a checkbox per class showing them; the note beneath it says membership
+means public membership of the `member_orgs` organisations, and names
+the other members §7.1 counts: those the `members` list names, and the
+owner of a target owned by a user. The footer gives the generation date
+(the date alone, from the caller's clock), the tool version, the window
+and the scope rule in words; for an `include` of exact names the rule
+lists the names and says the `scan_*` toggles do not apply. The landing
+card shows each charted metric's `all` chart, and names each one
+`render` has not written; when `classes` leaves out `all`, it shows none
+and says to add `all` to `classes`.
 
 Jinja2 templates ship inside the package (`PackageLoader`, as GSR),
 with autoescape on for every `*.html.j2` template; logins and

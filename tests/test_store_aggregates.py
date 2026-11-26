@@ -182,6 +182,25 @@ def test_days_missing_jobs_lists_concluded_runs_only() -> None:
         assert store.days_missing_jobs(_day(1), _day(9)) == [("acme/a", _day(2))]
 
 
+def test_run_job_counts_count_concluded_runs_in_scope_per_actor() -> None:
+    with _store() as store:
+        store.enter_scope("acme/b", _day(5))
+        store.upsert_runs(
+            [
+                _run(1),
+                _run(2, jobs=None),
+                _run(3, jobs=None, status="in_progress", conclusion=None),
+                _run(4, repo="acme/b", jobs=None),
+                _run(5, created_at=_at(12)),
+                _run(6, event="schedule", actor="editor"),
+            ]
+        )
+        assert store.run_job_counts(_day(1), _day(9)) == [
+            (None, None, "schedule", 1, 1),
+            ("alice", "User", None, 1, 2),
+        ]
+
+
 def test_actors_lists_every_credited_login_once() -> None:
     from github_statistics.store import Review
 
