@@ -19,6 +19,7 @@ from .doctor import doctor
 from .export import export
 from .render import render
 from .scope import scope
+from .site import site
 
 DERIVATIVE_WIDTH = 1920
 DEMO_MIN_DAYS = 7
@@ -36,6 +37,7 @@ app.command()(scope)
 app.command()(export)
 app.command(name="collect")(collect_command)
 app.command()(render)
+app.command()(site)
 
 
 def _version_callback(value: bool) -> None:

@@ -1,0 +1,30 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{# SPDX-FileCopyrightText: 2026 The Linux Foundation #}
+{% extends "base.html.j2" %}
+{% from "macros.html.j2" import chart_image %}
+{% block main %}
+<h1>GitHub statistics</h1>
+<p class="note">Daily activity over {{ window }}.</p>
+{% for card in cards %}
+<section class="card">
+  <h2><a href="{{ card.href }}">{{ card.owner }}</a></h2>
+  <dl class="headline">
+  {% for label, value in card.headline %}
+    <div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
+  {% endfor %}
+  </dl>
+  {% for entry in card.charts %}
+  {% if entry.chart %}
+  {{ chart_image(entry.chart) }}
+  {% else %}
+  <p class="missing">No {{ entry.heading|lower }} chart yet: run <code>github-statistics render</code>.</p>
+  {% endif %}
+  {% endfor %}
+  {% if not card.previews %}
+  <p class="missing">Chart previews show the everyone view: add <code>all</code> to <code>classes</code> to show them.</p>
+  {% endif %}
+  <p class="scope">{{ card.scope_rule }}</p>
+</section>
+{% endfor %}
+{% endblock %}
+{% block footer %}Window: {{ window }}.{% endblock %}
