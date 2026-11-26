@@ -105,8 +105,8 @@ def test_thirty_day_render_draws_three_polygons_per_bar(tmp_path: Path) -> None:
     assert chart.legend == ("Opened", "Closed")
 
 
-def test_gap_days_draw_slabs_and_no_bars(tmp_path: Path) -> None:
-    """Gap days draw a slab each run of days, no bars, and add their legend entries."""
+def test_gap_days_draw_slabs_and_partial_days_keep_bars(tmp_path: Path) -> None:
+    """Gap days draw a slab per run; partial days keep their bars, no-data days lose them."""
     from github_statistics.render import Coverage, GapSpan, render_chart
 
     coverage = ["complete"] * 30
@@ -125,8 +125,69 @@ def test_gap_days_draw_slabs_and_no_bars(tmp_path: Path) -> None:
         GapSpan(20, 21, Coverage.PARTIAL),
     )
     assert chart.gap_slabs == 2
-    assert chart.bar_polygons == 3 * 2 * 27
-    assert chart.legend == ("Opened", "Closed", "no data", "partial data")
+    assert chart.bar_polygons == 3 * 2 * 28
+    assert chart.legend == (
+        "Opened",
+        "Closed",
+        "no data",
+        "partial data (lower bound)",
+    )
+
+
+def test_partial_slab_is_drawn_over_its_bars() -> None:
+    """A partial slab covers its own bars, not later ones; a no-data slab lies beneath."""
+    from matplotlib.figure import Figure
+
+    from github_statistics.render import plan_chart
+    from github_statistics.render.bars3d import _draw_gaps, _draw_rows
+    from github_statistics.render.layout import Geometry
+
+    style = _small_style()
+    spec = _spec([4, 4, 4], [2, 2, 2], coverage=["partial", "complete", "none"])
+    plan = plan_chart(spec, style)
+    geo = Geometry.build(style, len(spec.days))
+    ax = Figure().add_axes((0.0, 0.0, 1.0, 1.0))
+
+    _draw_gaps(ax, plan, style, geo)
+    _draw_rows(ax, spec, plan, style, geo)
+    none, *rest = ax.collections
+    order = sorted(rest, key=lambda artist: artist.get_zorder())
+    slab = next(i for i, artist in enumerate(order) if artist.get_hatch())
+
+    def days(artists: list[Any]) -> set[int]:
+        return {
+            int((min(path.vertices[:, 0]) - geo.left) // geo.pitch)
+            for artist in artists
+            for path in artist.get_paths()
+        }
+
+    assert none.get_zorder() < min(artist.get_zorder() for artist in rest)
+    assert days(order[:slab]) == {0}
+    assert days(order[slab + 1 :]) == {1}
+
+
+def test_partial_days_set_the_scale_but_not_the_peaks() -> None:
+    """A partial bar fits under the top tick, yet only complete days carry a peak."""
+    from github_statistics.render import plan_chart
+
+    plan = plan_chart(
+        _spec([5, 90, 3], [2, 80, 4], coverage=["complete", "partial", "complete"])
+    )
+
+    assert plan.y_max >= 90
+    assert {(peak.series, peak.day, peak.value) for peak in plan.peaks} == {
+        ("opened", 0, 5),
+        ("closed", 2, 4),
+    }
+
+
+def test_no_peak_without_a_complete_day() -> None:
+    """A series with only partial days shows no peak label."""
+    from github_statistics.render import plan_chart
+
+    plan = plan_chart(_spec([5, 9], [2, 3], coverage=["partial", "partial"]))
+
+    assert plan.peaks == ()
 
 
 def test_legend_lists_only_the_gap_kinds_present() -> None:
