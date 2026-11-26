@@ -57,7 +57,9 @@ dev = [
   "hypothesis==6.170.15",
   "mypy==2.4.1",
   "ruff==0.17.5",
+  "pyyaml==6.0.4",
   "types-jsonschema==4.26.0.20261006",
+  "types-PyYAML==6.0.12.20261113",
 ]
 
 [dependency-groups]
@@ -69,7 +71,9 @@ dev = [
   "hypothesis==6.170.15",
   "mypy==2.4.1",
   "ruff==0.17.5",
+  "pyyaml==6.0.4",
   "types-jsonschema==4.26.0.20261006",
+  "types-PyYAML==6.0.12.20261113",
 ]
 
 [tool.hatch.version]
