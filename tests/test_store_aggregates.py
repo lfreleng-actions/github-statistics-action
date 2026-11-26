@@ -138,13 +138,12 @@ def test_run_day_counts_group_scheduled_runs_without_an_actor() -> None:
         )
         rows = store.run_day_counts(_day(1), _day(9))
     assert rows == [
-        RunDayCount(_day(2), None, None, True, "success", 2, 4),
-        RunDayCount(_day(2), "alice", "User", False, "failure", 1, 1),
-        RunDayCount(_day(2), "alice", "User", False, "success", 2, 3),
+        RunDayCount(_day(2), None, None, "schedule", "success", 2, 4),
+        RunDayCount(_day(2), "alice", "User", None, "failure", 1, 1),
+        RunDayCount(_day(2), "alice", "User", None, "success", 2, 3),
     ]
 
 
-@pytest.mark.xfail(strict=True)
 def test_run_day_counts_group_dynamic_runs_without_an_actor() -> None:
     with _store() as store:
         store.upsert_runs(

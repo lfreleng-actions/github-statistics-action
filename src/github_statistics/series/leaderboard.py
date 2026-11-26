@@ -186,8 +186,9 @@ def build_leaderboard(
     """The contributor rows of ``target`` over the window ending on ``until``.
 
     Sorted by ``total`` descending, then login; ``contributors.top_n``
-    caps the rows, ``0`` keeping them all. Ignored logins, scheduled
-    runs and events from repositories out of scope that day are left out.
+    caps the rows, ``0`` keeping them all. Ignored logins, scheduled and
+    dynamic runs and events from repositories out of scope that day are
+    left out.
     """
     if identities is None:
         identities = resolve_identities(target, config)

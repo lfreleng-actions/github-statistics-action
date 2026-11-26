@@ -214,7 +214,6 @@ def test_scheduled_run_is_an_org_bot_whatever_its_actor() -> None:
     assert series.values("workflow_outcomes", "succeeded", "org_bot")[1] == 2
 
 
-@pytest.mark.xfail(strict=True)
 def test_dynamic_run_is_an_external_bot_whatever_its_actor() -> None:
     with _store() as store:
         store.upsert_runs(

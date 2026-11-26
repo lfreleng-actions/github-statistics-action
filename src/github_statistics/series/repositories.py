@@ -6,7 +6,7 @@ One row per repository in scope on any day of the window, with the
 counts the charts draw and, per charted metric, the share of window
 days the repository covers, so a reader can see which repository
 drives a spike or a gap. Counts follow the series rules: ignored logins
-are left out and a scheduled run counts whatever its actor.
+are left out and a scheduled or dynamic run counts whatever its actor.
 """
 
 from __future__ import annotations
@@ -110,10 +110,9 @@ def build_repositories(
         ):
             if repo in counts and counted(login, account_type):
                 counts[repo][column] += count
-    for repo, login, account_type, scheduled, runs, jobs in store.run_repository_counts(
-        first, last
-    ):
-        if repo in counts and (scheduled or counted(login, account_type)):
+    run_rows = store.run_repository_counts(first, last)
+    for repo, login, account_type, automation, runs, jobs in run_rows:
+        if repo in counts and (automation is not None or counted(login, account_type)):
             counts[repo]["runs"] += runs
             counts[repo]["jobs"] += jobs
     metrics = _enabled(config)

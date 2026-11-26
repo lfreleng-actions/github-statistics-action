@@ -3,7 +3,8 @@
 """Daily series per metric, series and actor class (design §7.3).
 
 Every count goes to the author of the item, or to the triggering actor
-of a workflow run; a scheduled run goes to ``org_bot`` and to no login.
+of a workflow run; a scheduled run goes to ``org_bot`` and a dynamic
+run to ``external_bot``, both to no login.
 Pure and deterministic: the window end is passed in, and the store is
 the only input besides the configuration.
 """
@@ -18,6 +19,7 @@ from types import MappingProxyType
 from ..config import Config, ResolvedIdentities, Target, resolve_identities
 from ..render.model import Coverage
 from ..store import Store
+from ..store.aggregates import DYNAMIC_EVENT, SCHEDULE_EVENT
 from .actors import (
     AGGREGATES,
     CLASSES,
@@ -51,6 +53,11 @@ SUCCESS_CONCLUSIONS = frozenset({"success"})
 FAILURE_CONCLUSIONS = frozenset({"failure", "startup_failure", "timed_out"})
 _ITEM_KINDS = {PULL_REQUESTS: "pr", ISSUES: "issue"}
 _ITEM_COLUMNS = {OPENED: "created_at", CLOSED: "closed_at"}
+# The class of a run of each automation event, whatever its actor.
+AUTOMATION_CLASSES: dict[str, ActorClass] = {
+    SCHEDULE_EVENT: ActorClass.ORG_BOT,
+    DYNAMIC_EVENT: ActorClass.EXTERNAL_BOT,
+}
 
 SeriesKey = tuple[str, str, str]
 
@@ -174,8 +181,8 @@ def _count_runs(
         for series in SERIES[metric]:
             counter.start(metric, series)
     for row in store.run_day_counts(days[0], days[-1]):
-        if row.scheduled:
-            actor_class: ActorClass | None = ActorClass.ORG_BOT
+        if row.automation is not None:
+            actor_class: ActorClass | None = AUTOMATION_CLASSES[row.automation]
         else:
             actor_class = counter.classify(row.login, row.account_type)
         if actor_class is None:

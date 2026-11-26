@@ -182,13 +182,12 @@ def test_run_repository_counts_credit_a_scheduled_run_to_no_login() -> None:
         rows = store.run_repository_counts(_day(1), _day(10))
         actors = store.run_actor_counts(_day(1), _day(10))
     assert rows == [
-        ("acme/a", None, None, True, 1, 3),
-        ("acme/a", "alice", "User", False, 1, 3),
+        ("acme/a", None, None, "schedule", 1, 3),
+        ("acme/a", "alice", "User", None, 1, 3),
     ]
     assert actors == [("alice", "User", 1)]
 
 
-@pytest.mark.xfail(strict=True)
 def test_run_repository_counts_credit_a_dynamic_run_to_no_login() -> None:
     with _store() as store:
         store.upsert_runs([_run(1), _run(2, event="dynamic")])
@@ -276,7 +275,6 @@ def test_scheduled_runs_are_credited_to_no_login() -> None:
     assert board["bob"].counts["runs_triggered"] == 1
 
 
-@pytest.mark.xfail(strict=True)
 def test_dynamic_runs_are_credited_to_no_login() -> None:
     with _store() as store:
         store.upsert_runs([_run(1), _run(2, event="dynamic"), _run(3, actor="bob")])
@@ -427,7 +425,6 @@ def test_repository_table_counts_per_repository() -> None:
     assert table["acme/b"].counts["prs_opened"] == 1
 
 
-@pytest.mark.xfail(strict=True)
 def test_repository_table_counts_a_dynamic_run_whatever_its_actor() -> None:
     with _store() as store:
         store.upsert_runs([_run(1, event="dynamic", actor="ignored")])
