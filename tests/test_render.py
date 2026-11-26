@@ -105,7 +105,6 @@ def test_thirty_day_render_draws_three_polygons_per_bar(tmp_path: Path) -> None:
     assert chart.legend == ("Opened", "Closed")
 
 
-@pytest.mark.xfail(strict=True, reason="partial days draw no bars yet")
 def test_gap_days_draw_slabs_and_partial_days_keep_bars(tmp_path: Path) -> None:
     """Gap days draw a slab per run; partial days keep their bars, no-data days lose them."""
     from github_statistics.render import Coverage, GapSpan, render_chart
@@ -135,7 +134,6 @@ def test_gap_days_draw_slabs_and_partial_days_keep_bars(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="partial slabs are drawn under the bars")
 def test_partial_slab_is_drawn_over_its_bars() -> None:
     """A partial slab covers its own bars, not later ones; a no-data slab lies beneath."""
     from matplotlib.figure import Figure
@@ -168,7 +166,6 @@ def test_partial_slab_is_drawn_over_its_bars() -> None:
     assert days(order[slab + 1 :]) == {1}
 
 
-@pytest.mark.xfail(strict=True, reason="partial days do not set the scale yet")
 def test_partial_days_set_the_scale_but_not_the_peaks() -> None:
     """A partial bar fits under the top tick, yet only complete days carry a peak."""
     from github_statistics.render import plan_chart

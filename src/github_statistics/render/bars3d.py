@@ -37,6 +37,7 @@ from .model import (
     ChartPlan,
     ChartSpec,
     Coverage,
+    GapSpan,
     RenderedChart,
     Style,
 )
@@ -129,24 +130,35 @@ def _gap_colour(style: Style, coverage: Coverage) -> str:
     return style.no_data if coverage is Coverage.NONE else style.partial_data
 
 
-def _draw_gaps(ax: Axes, plan: ChartPlan, style: Style, geo: Geometry) -> int:
-    """Draw a hatched slab, wall-high and floor-deep, over each gap span."""
+def _draw_slab(
+    ax: Axes, span: GapSpan, style: Style, geo: Geometry, zorder: float
+) -> None:
+    """Draw a hatched slab, wall-high and floor-deep, over ``span``."""
     height = geo.top - geo.bottom - geo.floor_dy
-    for span in plan.gaps:
-        x0 = geo.left + span.start * geo.pitch
-        width = (span.stop - span.start - 1) * geo.pitch + geo.width
-        colour = _gap_colour(style, span.coverage)
-        ax.add_collection(
-            PolyCollection(
-                list(faces(x0, geo.bottom, height, width, geo.floor_dx, geo.floor_dy)),
-                facecolors=[(*to_rgb(colour), style.gap_alpha)],
-                edgecolors=colour,
-                hatch=style.gap_hatch,
-                linewidths=px_to_pt(style, style.edge_width_px),
-                zorder=3,
-            )
+    x0 = geo.left + span.start * geo.pitch
+    width = (span.stop - span.start - 1) * geo.pitch + geo.width
+    colour = _gap_colour(style, span.coverage)
+    ax.add_collection(
+        PolyCollection(
+            list(faces(x0, geo.bottom, height, width, geo.floor_dx, geo.floor_dy)),
+            facecolors=[(*to_rgb(colour), style.gap_alpha)],
+            edgecolors=colour,
+            hatch=style.gap_hatch,
+            linewidths=px_to_pt(style, style.edge_width_px),
+            zorder=zorder,
         )
-    return len(plan.gaps)
+    )
+
+
+def _draw_gaps(ax: Axes, plan: ChartPlan, style: Style, geo: Geometry) -> int:
+    """Draw a slab behind the bars over each no-data span; return the slab count.
+
+    Partial spans are drawn among the bars by :func:`_draw_rows`.
+    """
+    spans = [span for span in plan.gaps if span.coverage is Coverage.NONE]
+    for span in spans:
+        _draw_slab(ax, span, style, geo, zorder=3)
+    return len(spans)
 
 
 def _bar_height(value: int, scale: float) -> float:
@@ -155,11 +167,11 @@ def _bar_height(value: int, scale: float) -> float:
 
 
 def _drawable(spec: ChartSpec, bars: Sequence[Bar]) -> list[Bar]:
-    """The bars of a row that are drawn: covered days with a positive value."""
+    """The bars of a row that are drawn: days with any data and a positive value."""
     return [
         bar
         for bar in bars
-        if bar.value > 0 and spec.coverage[bar.day] is Coverage.COMPLETE
+        if bar.value > 0 and spec.coverage[bar.day] is not Coverage.NONE
     ]
 
 
@@ -192,38 +204,51 @@ def _draw_shadows(
 
 def _draw_rows(
     ax: Axes, spec: ChartSpec, plan: ChartPlan, style: Style, geo: Geometry
-) -> int:
-    """Draw the back row, then the front row, each left to right; return the polygon count."""
+) -> tuple[int, int]:
+    """Draw the bars and the partial slabs; return the polygon and slab counts.
+
+    Each partial slab splits the days at its end: the back row, then the
+    front row, of the days up to that end, then the slab, then the days
+    after it. So the slab covers its own bars and those standing behind
+    it, which show through as a lower bound, but no bar in front of it.
+    """
     colours = {spec.first.key: spec.first.colour, spec.second.key: spec.second.colour}
     scale = geo.scale(plan.y_max)
     factors = (style.side_shade, style.top_shade, style.front_shade)
+    partial = [span for span in plan.gaps if span.coverage is Coverage.PARTIAL]
     count = 0
-    for row, bars in ((1, plan.back), (0, plan.front)):
-        polygons: list[Polygon] = []
-        fills: list[RGB] = []
-        edges: list[RGB] = []
-        for bar in _drawable(spec, bars):
-            x0, y0 = geo.bar_origin(bar.day, row)
-            base = colours[bar.series]
-            for polygon, factor in zip(
-                faces(x0, y0, _bar_height(bar.value, scale), geo.width, geo.dx, geo.dy),
-                factors,
-                strict=True,
-            ):
-                polygons.append(polygon)
-                fills.append(shade(base, factor))
-                edges.append(shade(base, style.edge_shade))
-        ax.add_collection(
-            PolyCollection(
-                polygons,
-                facecolors=fills,
-                edgecolors=edges,
-                linewidths=px_to_pt(style, style.edge_width_px),
-                zorder=5 + (1 - row),
+    start = 0
+    for index, stop in enumerate([*(span.stop for span in partial), len(spec.days)]):
+        for row, bars in ((1, plan.back), (0, plan.front)):
+            polygons: list[Polygon] = []
+            fills: list[RGB] = []
+            edges: list[RGB] = []
+            for bar in _drawable(spec, bars[start:stop]):
+                x0, y0 = geo.bar_origin(bar.day, row)
+                base = colours[bar.series]
+                height = _bar_height(bar.value, scale)
+                for polygon, factor in zip(
+                    faces(x0, y0, height, geo.width, geo.dx, geo.dy),
+                    factors,
+                    strict=True,
+                ):
+                    polygons.append(polygon)
+                    fills.append(shade(base, factor))
+                    edges.append(shade(base, style.edge_shade))
+            ax.add_collection(
+                PolyCollection(
+                    polygons,
+                    facecolors=fills,
+                    edgecolors=edges,
+                    linewidths=px_to_pt(style, style.edge_width_px),
+                    zorder=5,
+                )
             )
-        )
-        count += len(polygons)
-    return count
+            count += len(polygons)
+        if index < len(partial):
+            _draw_slab(ax, partial[index], style, geo, zorder=5)
+        start = stop
+    return count, len(partial)
 
 
 def render_chart(
@@ -267,7 +292,7 @@ def render_chart(
         _draw_backdrop(ax, plan, style, geo)
         slabs = _draw_gaps(ax, plan, style, geo)
         _draw_shadows(ax, spec, plan, style, geo)
-        polygons = _draw_rows(ax, spec, plan, style, geo)
+        polygons, partial_slabs = _draw_rows(ax, spec, plan, style, geo)
         draw_peaks(ax, labels, style)
         draw_legend(ax, spec, plan, style)
         draw_text(ax, spec, style)
@@ -286,7 +311,7 @@ def render_chart(
         height=height,
         plan=plan,
         bar_polygons=polygons,
-        gap_slabs=slabs,
+        gap_slabs=slabs + partial_slabs,
         legend=plan.legend,
         legend_box=legend,
         peak_labels=labels,

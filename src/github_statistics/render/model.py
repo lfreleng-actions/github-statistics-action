@@ -227,7 +227,7 @@ class ChartPlan:
     """The computed layout of a chart, independent of pixels.
 
     ``back`` and ``front`` hold one bar per day, gap days included;
-    the renderer skips gap days and zero values when drawing.
+    the renderer skips days without data and zero values when drawing.
     """
 
     back: tuple[Bar, ...]

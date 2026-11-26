@@ -1373,13 +1373,20 @@ Composition:
 
 ### 8.3 Gap days
 
-A day whose coverage is partial or none gets no bars; instead a
-hatched, translucent slab in neutral grey rises from the baseline to
-the top of the wall at that day's position, following the depth
-vector. The legend gains a "no data" or "partial data" entry when,
-and not before, such days exist. A zero day, by contrast, shows the
-bare floor. The distinction is the whole point of the coverage table:
-a chart must never let a failed run masquerade as a quiet day.
+A day whose coverage is partial or none gets a hatched, translucent
+slab in neutral grey that rises from the baseline to the top of the
+wall at that day's position, following the depth vector. A day with
+no data gets the slab and no bars. A partial day keeps its bars,
+drawn from the values the store holds, with the slab over them so
+they show through it: a lower bound, "at least this much", with no
+estimate of the missing part. Partial values count towards the
+vertical scale, so a partial bar never rises past the wall, but peak
+annotations consider complete days alone, and a series with no
+complete day gets no annotation. The legend gains a "no data" or
+"partial data (lower bound)" entry when, and not before, such days
+exist. A zero day, by contrast, shows the bare floor. The distinction
+is the whole point of the coverage table: a chart must never let a
+failed run masquerade as a quiet day.
 
 ### 8.4 Outputs per chart
 

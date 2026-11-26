@@ -59,7 +59,7 @@ LINE_HEIGHT = 1.2
 LABEL_STEP = 1.6
 
 NO_DATA_LABEL = "no data"
-PARTIAL_DATA_LABEL = "partial data"
+PARTIAL_DATA_LABEL = "partial data (lower bound)"
 
 Point = tuple[float, float]
 Polygon = list[Point]
@@ -194,7 +194,10 @@ def _month_labels(
 
 
 def _peaks(spec: ChartSpec, back: Sequence[Bar]) -> tuple[Peak, ...]:
-    """Find each series' highest covered day, earliest on a tie."""
+    """Find each series' highest complete day, earliest on a tie.
+
+    A partial day is a lower bound, so it never carries a peak.
+    """
     peaks: list[Peak] = []
     for series in (spec.first, spec.second):
         best: tuple[int, int] | None = None
@@ -212,8 +215,8 @@ def _peaks(spec: ChartSpec, back: Sequence[Bar]) -> tuple[Peak, ...]:
 def plan_chart(spec: ChartSpec, style: Style = Style()) -> ChartPlan:
     """Compute rows, ticks, gap spans, month labels, peaks and legend for ``spec``."""
     back, front = _assign(spec)
-    covered = [bar.value for bar in back if spec.coverage[bar.day] is Coverage.COMPLETE]
-    ticks = nice_ticks(max(covered, default=0), style.target_ticks)
+    drawn = [bar.value for bar in back if spec.coverage[bar.day] is not Coverage.NONE]
+    ticks = nice_ticks(max(drawn, default=0), style.target_ticks)
     gaps = _gap_spans(spec.coverage)
     geometry = Geometry.build(style, len(spec.days))
     legend = [spec.first.label, spec.second.label]
@@ -281,7 +284,7 @@ def _bars_top(
     top = geo.bottom
     for row, bars in ((1, plan.back), (0, plan.front)):
         for bar in bars:
-            if bar.value <= 0 or spec.coverage[bar.day] is not Coverage.COMPLETE:
+            if bar.value <= 0 or spec.coverage[bar.day] is Coverage.NONE:
                 continue
             left, base = geo.bar_origin(bar.day, row)
             if left < x1 and x0 < left + geo.width + geo.dx:
