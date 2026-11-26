@@ -24,3 +24,8 @@ paths:
       # closing quote sits immediately after '$/', so malformed
       # extra-slash forms such as '$//' are still reported.
       - 'specifying action "\$/" in invalid format because path is missing'
+  # The daily workflow runs the action at the repository root the same
+  # way; the note above applies unchanged.
+  .github/workflows/statistics.yaml:
+    ignore:
+      - 'specifying action "\$/" in invalid format because path is missing'
