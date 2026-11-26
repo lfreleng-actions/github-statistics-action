@@ -68,6 +68,7 @@ class Overrides:
     output_dir: str | None = None
     cache_dir: str | None = None
     budget: int | None = None
+    max_minutes: int | None = None
     token_env: str | None = None
     identities: Identities = field(default_factory=Identities)
 
@@ -310,6 +311,7 @@ def _apply(data: Mapping[str, Any], overrides: Overrides) -> dict[str, Any]:
         ("output", "directory", overrides.output_dir),
         ("cache", "directory", overrides.cache_dir),
         ("budget", "rest", overrides.budget),
+        ("budget", "minutes", overrides.max_minutes),
     )
     for section, key, value in sections:
         if value is not None:

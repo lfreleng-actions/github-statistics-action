@@ -76,6 +76,7 @@ def _build(**values: Any) -> SharedOptions:
         output_dir=values["output_dir"] or None,
         cache_dir=values["cache_dir"] or None,
         budget=values["budget"],
+        max_minutes=values["max_minutes"],
         token_env=values["token_env"] or None,
         identities=Identities(
             org_bots=_identity(values["org_bots"]),
@@ -131,6 +132,12 @@ def _parameters() -> list[inspect.Parameter]:
         _option("output_dir", text, "DIR", "Site root."),
         _option("cache_dir", text, "DIR", "Store root."),
         _option("budget", number, "N", "REST requests this run may spend."),
+        _option(
+            "max_minutes",
+            number,
+            "N",
+            "Minutes collection may take (default: no limit).",
+        ),
         _option("token_env", text, "NAME", "Environment variable holding the token."),
         _option(
             "org_bots", lists, "LOGINS", f"The organisation's bots; {_IDENTITY_HELP}."

@@ -188,7 +188,6 @@ def test_a_rate_limited_seed_reports_a_spent_scope(
     assert output.read_text(encoding="utf-8").splitlines()[0] == "requests_used=1"
 
 
-@pytest.mark.xfail(strict=True)
 def test_a_passed_deadline_stops_after_the_scope_and_exits_zero(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -221,7 +220,6 @@ def test_a_passed_deadline_stops_after_the_scope_and_exits_zero(
         assert store.in_scope(datetime.now(UTC).date()) == ["acme/a"]
 
 
-@pytest.mark.xfail(strict=True, reason="time limit not implemented yet")
 def test_a_passed_deadline_skips_seeding_the_budget(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -256,7 +254,6 @@ def test_a_passed_deadline_skips_seeding_the_budget(
     assert "| scope (time limit reached) |" in summary.read_text(encoding="utf-8")
 
 
-@pytest.mark.xfail(strict=True)
 def test_a_seed_failing_as_time_runs_out_is_not_retried(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -288,7 +285,6 @@ def test_a_seed_failing_as_time_runs_out_is_not_retried(
     assert "| scope (time limit reached) |" in summary.read_text(encoding="utf-8")
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize(
     ("delay", "woke", "stops"),
     [(5.0, 5.0, False), (10.0, 10.0, True), (5.0, 12.0, True)],
@@ -315,7 +311,6 @@ async def test_a_backoff_ending_at_or_past_the_deadline_stops(
         await backoff(delay)
 
 
-@pytest.mark.xfail(strict=True)
 def test_a_count_spent_before_the_deadline_keeps_its_step(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

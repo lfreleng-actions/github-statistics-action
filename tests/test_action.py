@@ -28,6 +28,7 @@ INPUTS = {
     "output_dir",
     "cache_dir",
     "budget",
+    "max_minutes",
     "refresh",
     "strict",
     "org_bots",
@@ -203,7 +204,6 @@ def test_scope_leaves_out_run_only_switches(tmp_path: Path) -> None:
     assert "--strict" not in args
 
 
-@pytest.mark.xfail(strict=True)
 def test_max_minutes_reaches_the_tool_only_when_set(tmp_path: Path) -> None:
     """``max_minutes`` becomes ``--max-minutes``; unset, no flag is passed."""
     assert _action()["inputs"]["max_minutes"]["default"] == ""

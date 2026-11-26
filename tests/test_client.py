@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
 import httpx
@@ -436,13 +435,12 @@ def test_budget_reserve_and_exhaustion() -> None:
     assert budget.graphql_exhausted
 
 
-@pytest.mark.xfail(strict=True)
 def test_budget_deadline_spends_like_an_empty_count_once_passed() -> None:
     """Spending works before the deadline and is refused from it on."""
-    budget_type: Any = importlib.import_module("github_statistics.client").Budget
+    from github_statistics.client import Budget
 
     now = [0.0]
-    budget = budget_type(deadline=60.0, clock=lambda: now[0])
+    budget = Budget(deadline=60.0, clock=lambda: now[0])
     assert budget.try_spend_rest()
     assert budget.try_spend_graphql(1)
     assert not budget.timed_out
@@ -455,17 +453,16 @@ def test_budget_deadline_spends_like_an_empty_count_once_passed() -> None:
     assert budget.rest_exhausted
     assert budget.graphql_exhausted
     assert (budget.rest_spent, budget.graphql_spent) == (1, 1)
-    assert not budget_type(clock=lambda: 1e12).timed_out
+    assert not Budget(clock=lambda: 1e12).timed_out
 
 
-@pytest.mark.xfail(strict=True)
 def test_budget_records_whether_a_count_stopped_it_before_the_deadline() -> None:
     """A count found spent before the deadline is a stop; one after it is not."""
-    budget_type: Any = importlib.import_module("github_statistics.client").Budget
+    from github_statistics.client import Budget
 
     now = [0.0]
-    timed = budget_type(deadline=60.0, clock=lambda: now[0])
-    counted = budget_type(rest=1, deadline=60.0, clock=lambda: now[0])
+    timed = Budget(deadline=60.0, clock=lambda: now[0])
+    counted = Budget(rest=1, deadline=60.0, clock=lambda: now[0])
     assert counted.try_spend_rest()
     assert not counted.stopped_by_count
     assert counted.rest_exhausted
@@ -482,16 +479,14 @@ def test_budget_records_whether_a_count_stopped_it_before_the_deadline() -> None
     assert counted.stopped_by_count
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_queued_query_holding_every_point_is_not_a_count_stop() -> None:
     """Points a query holds, then gives back unsent at the deadline, stop nothing."""
     import asyncio
 
-    from github_statistics.client import BudgetExhaustedError, graphql
+    from github_statistics.client import Budget, BudgetExhaustedError, graphql
 
-    budget_type: Any = importlib.import_module("github_statistics.client").Budget
     now = [0.0]
-    budget = budget_type(graphql_points=2, deadline=60.0, clock=lambda: now[0])
+    budget = Budget(graphql_points=2, deadline=60.0, clock=lambda: now[0])
 
     with respx.mock:
         route = respx.post(f"{API}/graphql").respond(200, json={"data": {}})
@@ -510,7 +505,6 @@ async def test_a_queued_query_holding_every_point_is_not_a_count_stop() -> None:
     assert not budget.stopped_by_count
 
 
-@pytest.mark.xfail(strict=True, reason="time limit not implemented yet")
 async def test_graphql_waiting_or_retrying_past_the_deadline_is_not_sent() -> None:
     """A query queued or retried past the deadline stays unsent."""
     import asyncio

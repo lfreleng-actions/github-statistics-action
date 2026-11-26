@@ -4,18 +4,22 @@
 
 Each target syncs into its own store under its own budget, and the
 command prints a short table of what each did. A spent budget exits 0:
-a cold start takes several runs. ``--strict`` exits 2 once every target
-is done if any repository was unreadable; a rejected token exits 3 at
-once, naming the variable that holds it, never its value.
+a cold start takes several runs. So does a run that reaches its time
+limit, ``--max-minutes`` from the command's start, which the budget
+treats as spent. ``--strict`` exits 2 once every target is done if any
+repository was unreadable; a rejected token exits 3 at once, naming the
+variable that holds it, never its value.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Sequence
+import dataclasses
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
+from time import monotonic
 
 import httpx
 import typer
@@ -44,8 +48,32 @@ from .options import SharedOptions, shared_options
 
 STRICT_EXIT = 2
 AUTH_EXIT = 3
+TIME_LIMIT = "time limit reached"
 
 _Table = tuple[str, list[str], list[list[str]]]
+
+
+def _backoff_within(
+    budget: Budget,
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> Callable[[float], Awaitable[None]]:
+    """A transport's backoff ``sleep`` that ends at ``budget``'s deadline.
+
+    No retry starts at or past the deadline, not even one of the
+    uncharged ``GET /rate_limit`` seed, which the budget never refuses:
+    a backoff that would end later waits until the deadline, so a
+    rate-limit pause still holds until then, and raises
+    ``BudgetExhaustedError``, as does one that wakes with time up.
+    """
+
+    async def backoff(delay: float) -> None:
+        left = delay if budget.deadline is None else budget.deadline - budget.clock()
+        await sleep(max(min(delay, left), 0))
+        if left < delay or budget.timed_out:
+            raise BudgetExhaustedError("time limit reached; not retrying")
+
+    return backoff
 
 
 async def _collect_target(
@@ -55,26 +83,41 @@ async def _collect_target(
     now: datetime,
     until: date | None,
     refresh: bool,
+    deadline: float | None,
 ) -> CollectResult:
     """Collect ``target`` with its own transport, budget and store.
 
     ``until`` ends the window, by default the day before ``now``.
+    ``deadline``, a `monotonic` time, ends the reads like a spent
+    budget. The step it stopped is marked `TIME_LIMIT`; when a count
+    stopped an earlier step first, that step is named and the time
+    limit noted as reached later.
     """
     config = resolution.config
     limits = config.budget
     budget = Budget(
-        rest=limits.rest, graphql_points=limits.graphql_points, reserve=limits.reserve
+        rest=limits.rest,
+        graphql_points=limits.graphql_points,
+        reserve=limits.reserve,
+        deadline=deadline,
+        clock=monotonic,
     )
     directory = config.cache.directory
     cache = Path(directory) if directory else default_cache_dir()
-    async with Transport(resolve_token(target), budget=budget) as transport:
+    async with Transport(
+        resolve_token(target), budget=budget, sleep=_backoff_within(budget)
+    ) as transport:
         # A rate limit outlasting the retries has stopped the transport:
         # collect then sends nothing and reports its scope step spent.
-        with contextlib.suppress(BudgetExhaustedError):
-            await transport.seed_budget()
+        # Past the deadline, as an earlier target may leave it, the seed
+        # is skipped too, and collect only reports what is stored; one
+        # whose retries reach the deadline stops the same way.
+        if not budget.timed_out:
+            with contextlib.suppress(BudgetExhaustedError):
+                await transport.seed_budget()
         host = httpx.URL(transport.api_url).host
         with Store(store_path(cache, host, target.owner)) as store:
-            return await collect(
+            result = await collect(
                 config,
                 target,
                 now=now,
@@ -84,6 +127,20 @@ async def _collect_target(
                 refresh=refresh,
                 until=until,
             )
+    if result.exhausted and budget.timed_out:
+        # The step named is the first one stopped: the time limit's own,
+        # unless a count stopped the run before the deadline did.
+        if budget.stopped_by_count:
+            exhausted = f"{result.exhausted}; {TIME_LIMIT} later"
+        else:
+            exhausted = f"{result.exhausted} ({TIME_LIMIT})"
+        result = dataclasses.replace(result, exhausted=exhausted)
+    return result
+
+
+def collection_deadline(minutes: int | None) -> float | None:
+    """The `monotonic` time ``minutes`` from now; ``None`` for no limit."""
+    return None if minutes is None else monotonic() + minutes * 60
 
 
 def _tables(results: Sequence[CollectResult]) -> list[_Table]:
@@ -151,15 +208,24 @@ def collect_target(
     now: datetime,
     until: date | None,
     refresh: bool,
+    deadline: float | None = None,
 ) -> CollectResult:
     """Collect ``target``; a rejected token or a failed read raises the exit to raise.
 
-    A rejected token exits `AUTH_EXIT`, naming the variable that holds
-    it, never its value; any other client failure exits 1.
+    ``deadline``, from `collection_deadline`, bounds the reads. A
+    rejected token exits `AUTH_EXIT`, naming the variable that holds it,
+    never its value; any other client failure exits 1.
     """
     try:
         return asyncio.run(
-            _collect_target(resolution, target, now=now, until=until, refresh=refresh)
+            _collect_target(
+                resolution,
+                target,
+                now=now,
+                until=until,
+                refresh=refresh,
+                deadline=deadline,
+            )
         )
     except AuthError:
         raise fail(
@@ -206,10 +272,16 @@ def collect_command(
         resolution = options.resolve()
     except ConfigError as exc:
         raise fail(str(exc)) from None
+    deadline = collection_deadline(resolution.config.budget.minutes)
     now = datetime.now(UTC)
     results = [
         collect_target(
-            resolution, target, now=now, until=options.until, refresh=refresh
+            resolution,
+            target,
+            now=now,
+            until=options.until,
+            refresh=refresh,
+            deadline=deadline,
         )
         for target in resolution.config.targets
     ]

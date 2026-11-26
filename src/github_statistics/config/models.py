@@ -93,11 +93,14 @@ class Budget:
 
     ``reserve`` stays ``None`` unless configured, so the transport can
     choose its default: 500 for a token, 10 for anonymous reads.
+    ``minutes`` bounds how long collection may take; ``None`` sets no
+    time limit.
     """
 
     rest: int = 3000
     graphql_points: int = 1500
     reserve: int | None = None
+    minutes: int | None = None
 
 
 @dataclass(frozen=True)

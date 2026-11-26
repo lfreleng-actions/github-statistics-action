@@ -6,12 +6,16 @@ The budget is a courtesy limit, not exact accounting: GitHub enforces
 the real rate limit, and the transport backs off on it. The budget lets
 a run stop cleanly and leave headroom for other consumers. Nothing here
 raises; the transport raises ``BudgetExhaustedError`` when a reservation
-is refused, and a collector that meets it stops cleanly.
+is refused, and a collector that meets it stops cleanly. An optional
+deadline ends the run the same way: once it passes, the budget reports
+itself spent.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 DEFAULT_REST = 3000
 DEFAULT_GRAPHQL_POINTS = 1500
@@ -40,8 +44,20 @@ class Budget:
     ``rest`` bounds the run. Exactness beyond that is a non-goal.
 
     A GraphQL rate limit stops the GraphQL budget for the rest of the
-    run: ``graphql_stopped`` is never cleared, so a query that settles
-    afterwards cannot reopen it.
+    run: ``graphql_rate_limited`` is never cleared, so a query that
+    settles afterwards cannot reopen it.
+
+    ``deadline``, a time on ``clock`` (``time.monotonic`` unless a test
+    injects another), bounds how long the run may take: from it on,
+    every reservation is refused as if both counts were spent, and
+    ``timed_out`` tells the two apart. Requests already in flight finish;
+    ``graphql_stopped`` then keeps a query that holds its points but has
+    not been sent, or would retry, from sending. ``stopped_by_count``
+    records that a count or a GraphQL rate limit stopped the run before
+    the deadline did, so a report can tell which stopped it first. Only
+    a stop counts: a refused reservation, a count found spent where a
+    caller stops on it, or a rate limit; points a queued query holds
+    and then gives back do not.
     """
 
     rest: int = DEFAULT_REST
@@ -51,7 +67,12 @@ class Budget:
     graphql_spent: int = 0
     remaining: int | None = None
     reset: int | None = None
-    graphql_stopped: bool = False
+    graphql_rate_limited: bool = False
+    deadline: float | None = None
+    clock: Callable[[], float] = field(
+        default=time.monotonic, repr=False, compare=False
+    )
+    stopped_by_count: bool = field(default=False, init=False)
 
     def observe(self, remaining: int, reset: int | None = None) -> None:
         """Take the core ``remaining`` count of the window ending ``reset``.
@@ -82,7 +103,10 @@ class Budget:
     def try_spend_graphql(self, estimate: int) -> bool:
         """Take ``estimate`` GraphQL points before a query; false when not left."""
         estimate = max(estimate, 0)
-        if self.graphql_exhausted or self.graphql_left < estimate:
+        if self.graphql_exhausted:
+            return False
+        if self.graphql_left < estimate:
+            self.stopped_by_count = True
             return False
         self.graphql_spent += estimate
         return True
@@ -96,20 +120,40 @@ class Budget:
 
     def exhaust_graphql(self) -> None:
         """Stop GraphQL for the run, after GitHub rate-limited a query."""
-        self.graphql_stopped = True
+        if not self.timed_out:
+            self.stopped_by_count = True
+        self.graphql_rate_limited = True
+
+    @property
+    def graphql_stopped(self) -> bool:
+        """True once GraphQL is done for the run: rate limited or timed out."""
+        return self.graphql_rate_limited or self.timed_out
+
+    @property
+    def timed_out(self) -> bool:
+        """True once the deadline, if any, has passed."""
+        return self.deadline is not None and self.clock() >= self.deadline
 
     @property
     def rest_left(self) -> int:
-        """REST requests left: the allowance, less the reserve once observed."""
+        """REST requests left: the allowance, less the reserve once observed.
+
+        Zero once the deadline has passed. Before it, finding none left
+        sets ``stopped_by_count``: every caller stops on that.
+        """
+        if self.timed_out:
+            return 0
         left = max(self.rest - self.rest_spent, 0)
-        if self.remaining is None:
-            return left
-        reserve = DEFAULT_RESERVE if self.reserve is None else self.reserve
-        return min(left, max(0, self.remaining - reserve))
+        if self.remaining is not None:
+            reserve = DEFAULT_RESERVE if self.reserve is None else self.reserve
+            left = min(left, max(0, self.remaining - reserve))
+        if left == 0:
+            self.stopped_by_count = True
+        return left
 
     @property
     def graphql_left(self) -> int:
-        """GraphQL points left to spend; none once GraphQL is stopped."""
+        """GraphQL points left to spend; none once stopped or timed out."""
         if self.graphql_stopped:
             return 0
         return max(self.graphql_points - self.graphql_spent, 0)
@@ -121,5 +165,14 @@ class Budget:
 
     @property
     def graphql_exhausted(self) -> bool:
-        """True once no GraphQL point is left."""
-        return self.graphql_left == 0
+        """True once no GraphQL point is left.
+
+        Before the deadline, a true answer sets ``stopped_by_count``: a
+        caller stops on it. ``graphql_left`` alone, read to size a batch,
+        does not.
+        """
+        if self.graphql_left > 0:
+            return False
+        if not self.timed_out:
+            self.stopped_by_count = True
+        return True

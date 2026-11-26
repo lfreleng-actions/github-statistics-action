@@ -76,6 +76,7 @@ commas, spaces or newlines between items.
 | `output_dir`       | Site root (default `site`)                                                       |
 | `cache_dir`        | Store root (default `~/.cache/github-statistics`)                                |
 | `budget`           | REST requests this run may spend                                                 |
+| `max_minutes`      | Minutes collection may take (default: no limit); the stages after it still run   |
 | `refresh`          | `true` to ignore watermarks and re-read the window (`run`)                       |
 | `strict`           | `true` to exit 2 when a repository was unreadable (`run`)                        |
 | `org_bots`         | The organisation's own bots; replaces the configured list                        |
@@ -240,6 +241,11 @@ uvx github-statistics scope --org lfreleng-actions --format csv
 ```
 
 Open `site/index.html` in a browser to view the result.
+
+`--max-minutes N` stops collection `N` minutes after the command
+starts, as a spent budget does: the run exits 0 and still renders,
+exports and builds the site, and the next run resumes. It overrides
+`budget.minutes`, which sets no time limit by default.
 
 ## Development
 
