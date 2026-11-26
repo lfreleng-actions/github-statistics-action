@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import uuid
 from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
@@ -91,12 +92,14 @@ def fail(message: str, code: int = 1) -> typer.Exit:
     return typer.Exit(code)
 
 
-def write_outputs(outputs: Mapping[str, str]) -> None:
-    """Append ``outputs`` to ``$GITHUB_OUTPUT`` as ``key=value`` lines, when set.
+def write_outputs(outputs: Mapping[str, str], *, heredoc: bool = False) -> None:
+    """Append ``outputs`` to ``$GITHUB_OUTPUT``, when set.
 
-    A key outside ``[A-Za-z0-9_]``, or a value holding a line break or
-    ``<<``, could start another output or a multiline one, so the whole
-    set is refused before anything is written.
+    Each output is a ``key=value`` line, or with ``heredoc`` the
+    multiline ``key<<DELIMITER`` form under a fresh delimiter no value
+    holds. A key outside ``[A-Za-z0-9_]``, or a value holding a line
+    break or ``<<``, could start another output or a multiline one, so
+    the whole set is refused before anything is written.
     """
     path = os.environ.get("GITHUB_OUTPUT")
     if not path:
@@ -108,7 +111,13 @@ def write_outputs(outputs: Mapping[str, str]) -> None:
             raise fail(f"refusing the value of output {key}: it could inject another")
     with open(path, "a", encoding="utf-8") as handle:
         for key, value in outputs.items():
-            handle.write(f"{key}={value}\n")
+            if not heredoc:
+                handle.write(f"{key}={value}\n")
+                continue
+            delimiter = f"ghadelimiter_{uuid.uuid4()}"
+            while delimiter in value:
+                delimiter = f"ghadelimiter_{uuid.uuid4()}"
+            handle.write(f"{key}<<{delimiter}\n{value}\n{delimiter}\n")
 
 
 def append_summary(markdown: str) -> None:

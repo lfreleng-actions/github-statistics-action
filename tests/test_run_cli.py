@@ -56,9 +56,8 @@ def _stages(
     Collection returns or raises ``outcome``, by default a clean result
     for the target's owner; each target reports ``bots`` as unclassified.
     """
-    import github_statistics.cli.run as run_module
-
     import github_statistics.cli.collect as collect_module
+    import github_statistics.cli.run as run_module
 
     calls: list[tuple[str, str]] = []
 
@@ -127,7 +126,6 @@ def _heredocs(text: str) -> list[tuple[str, str]]:
     return pairs
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_stages_run_in_order_per_target_and_the_site_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -150,7 +148,6 @@ def test_stages_run_in_order_per_target_and_the_site_once(
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_a_spent_budget_still_renders_and_exits_zero(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -170,7 +167,6 @@ def test_a_spent_budget_still_renders_and_exits_zero(
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_a_rejected_token_exits_three_before_rendering(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -188,7 +184,6 @@ def test_a_rejected_token_exits_three_before_rendering(
     assert calls == [("collect", "acme")]
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_an_invalid_configuration_exits_one_and_runs_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -201,7 +196,6 @@ def test_an_invalid_configuration_exits_one_and_runs_nothing(
     assert calls == []
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_strict_exits_two_after_building_the_site(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -216,7 +210,6 @@ def test_strict_exits_two_after_building_the_site(
     assert calls[-1] == ("write_site", "acme")
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_writes_each_output_once_and_a_summary(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -242,7 +235,6 @@ def test_writes_each_output_once_and_a_summary(
     assert "helper[bot]" in text
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_warns_about_unclassified_bots_naming_the_keys(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -256,7 +248,6 @@ def test_warns_about_unclassified_bots_naming_the_keys(
     assert "identities.org_bots or identities.external_bots" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_refuses_an_output_value_that_injects_another(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -283,10 +274,10 @@ def test_refuses_an_output_value_that_injects_another(
         )
 
     assert result.exit_code == 1
+    assert "refusing the value of output site_dir" in result.output
     assert not output.exists() or output.read_text(encoding="utf-8") == ""
 
 
-@pytest.mark.xfail(strict=True, reason="run is not implemented yet")
 def test_clears_each_targets_charts_and_data_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -304,6 +295,28 @@ def test_clears_each_targets_charts_and_data_alone(
     assert result.exit_code == 0, result.output
     assert not any(path.exists() for path in stale)
     assert all(path.exists() for path in kept)
+
+
+def test_refuses_an_owner_directory_that_is_a_symbolic_link(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A linked owner directory stops the run; the directory it names is untouched."""
+    calls = _stages(monkeypatch)
+    elsewhere = tmp_path / "elsewhere"
+    kept = [elsewhere / "img" / "keep.png", elsewhere / "data" / "keep.json"]
+    for path in kept:
+        path.parent.mkdir(parents=True)
+        path.write_text("x", encoding="utf-8")
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "acme").symlink_to(elsewhere, target_is_directory=True)
+
+    result = _invoke(tmp_path, "--repo", "acme/a")
+
+    assert result.exit_code == 1
+    assert "is a symbolic link" in result.output
+    assert all(path.exists() for path in kept)
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -353,7 +366,6 @@ def test_write_outputs_appends_plain_pairs(
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="the multiline form is not written yet")
 def test_write_outputs_heredocs_with_a_delimiter_no_value_holds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

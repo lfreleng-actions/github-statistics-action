@@ -387,6 +387,28 @@ invalid configuration and 3 for a rejected token; it reports a spent
 budget, a skipped scope, a missing or unreadable store, an empty scope
 and unclassified bots without failing.
 
+`run` takes the shared options with `--refresh` and `--strict`. For
+each target in turn it removes `<output>/<owner>/img/` and
+`<output>/<owner>/data/`, and nothing else under the output directory,
+leaving no chart or data file of an earlier run for the site, and it
+stops with exit 1 when `<output>/<owner>` is a symbolic link, which
+would carry the deletion and every later write outside the output
+directory; then it collects, renders, exports and reads what the
+target's pages show. It writes the pages and the landing page once,
+after every target.
+A spent budget does not stop it: the charts show the gaps. A rejected
+token or an invalid configuration stops it before it renders
+anything. Its exit codes are those of `collect`: 0 on success, a spent
+budget included; 1 for an invalid configuration or a failed stage; 2
+with `--strict`, once it has written the site, when a repository was
+unreadable; 3 for a rejected token. Under GitHub Actions it writes the
+`site_dir`, `requests_used`, `coverage_complete`, `gap_days` and
+`unclassified_bots` (comma-separated) step outputs once, each in the
+multiline form under a fresh delimiter, refusing any name or value
+that could start another output, and appends its tables
+to the job summary. Every run ends with a warning per unclassified bot
+naming `identities.org_bots` and `identities.external_bots`.
+
 ## 5. Scope resolution
 
 The single most important abstraction. A **target** is one owner plus a
