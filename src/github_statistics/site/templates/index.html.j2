@@ -1,7 +1,7 @@
 {# SPDX-License-Identifier: Apache-2.0 #}
 {# SPDX-FileCopyrightText: 2026 The Linux Foundation #}
 {% extends "base.html.j2" %}
-{% from "macros.html.j2" import chart_image %}
+{% from "macros.html.j2" import chart_image, coverage_list %}
 {% block main %}
 <h1>GitHub statistics</h1>
 <p class="note">Daily activity over {{ window }}.</p>
@@ -13,6 +13,7 @@
     <div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
   {% endfor %}
   </dl>
+  {{ coverage_list(card.coverage_lines) }}
   {% for entry in card.charts %}
   {% if entry.chart %}
   {{ chart_image(entry.chart) }}

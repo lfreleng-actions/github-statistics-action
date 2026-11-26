@@ -3,3 +3,10 @@
 {% macro chart_image(chart) %}
 <a class="chart" href="{{ chart.href }}"><img src="{{ chart.src }}" width="{{ chart.width }}" height="{{ chart.height }}" alt="{{ chart.alt }}"{% if chart.lazy %} loading="lazy"{% endif %}></a>
 {% endmacro %}
+{% macro coverage_list(lines) %}
+<ul class="coverage">
+  {% for label, text in lines %}
+  <li>{{ label }}: {{ text }}</li>
+  {% endfor %}
+</ul>
+{% endmacro %}

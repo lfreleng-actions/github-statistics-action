@@ -1,7 +1,7 @@
 {# SPDX-License-Identifier: Apache-2.0 #}
 {# SPDX-FileCopyrightText: 2026 The Linux Foundation #}
 {% extends "base.html.j2" %}
-{% from "macros.html.j2" import chart_image %}
+{% from "macros.html.j2" import chart_image, coverage_list %}
 {% block title %}{{ owner }} · GitHub statistics{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ datatables_css_url }}" integrity="{{ datatables_css_sri }}" crossorigin="anonymous">
@@ -11,6 +11,7 @@
 {% block main %}
 <h1>{{ owner }}</h1>
 <p class="note">Daily activity over {{ window }}.</p>
+{{ coverage_list(coverage_lines) }}
 <nav aria-label="Sections">
   {% for metric in metrics %}<a href="#{{ metric.name }}">{{ metric.heading }}</a>
   {% endfor %}<a href="#contributors">Contributors</a>

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -28,13 +28,13 @@ from github_statistics import __version__
 
 from ..config import Config, ResolvedIdentities, Target, resolve_identities
 from ..render.charts import VIEW_LABELS
-from ..render.model import Coverage
 from ..scope.resolver import is_exact
 from ..series import Contributor, RepositoryRow, TargetSeries
 from ..series.daily import SERIES
 from ..series.leaderboard import leaderboard_columns
 from ..series.repositories import COLUMNS as REPOSITORY_COLUMNS
 from ..store import path_component
+from .coverage import coverage_lines, coverage_note, days_text, figure
 
 DATATABLES_VERSION = "9.0.3"
 DATATABLES_CSS_URL = (
@@ -89,10 +89,6 @@ CLASS_LABELS = {
     "external_bot": "external bot",
 }
 BOT_CLASSES = ("org_bot", "external_bot")
-HORIZON_NOTE = (
-    "GitHub lists workflow runs for about a year; earlier days show as no data."
-)
-_RUN_METRICS = ("workflows", "workflow_outcomes")
 
 
 @dataclass(frozen=True)
@@ -103,7 +99,12 @@ class SiteTarget:
     daily series' rules, deleted authors included, which the leaderboard
     leaves out. ``identities`` are the lists the tables were classed
     with; ``None`` means the configuration's, as `resolve_identities`
-    gives them.
+    gives them. ``runs_horizon`` is the owner's runs horizon, ``None``
+    when no run is held. ``job_runs`` is ``(counted, concluded)``: the
+    concluded runs in the window and how many of them have a job count;
+    ``None`` when not read. ``runs_partial`` is whether a workflows day
+    lacks some repository's runs, unread job counts aside; ``None`` when
+    not read.
     """
 
     target: Target
@@ -112,6 +113,9 @@ class SiteTarget:
     repositories: Sequence[RepositoryRow]
     merged: int
     identities: ResolvedIdentities | None = None
+    runs_horizon: date | None = None
+    job_runs: tuple[int, int] | None = None
+    runs_partial: bool | None = None
 
 
 def _environment() -> Environment:
@@ -127,15 +131,12 @@ def _environment() -> Environment:
     )
 
 
-def _days(count: int) -> str:
-    """``1 day`` or ``<count> days``."""
-    return f"{count} day" if count == 1 else f"{count} days"
-
-
 def _window(series: TargetSeries) -> str:
     """The window in words: its length and its first and last days."""
     days = series.days
-    return f"{_days(len(days))}, {days[0].isoformat()} to {days[-1].isoformat()} (UTC)"
+    return (
+        f"{days_text(len(days))}, {days[0].isoformat()} to {days[-1].isoformat()} (UTC)"
+    )
 
 
 def _scope_rule(target: Target) -> str:
@@ -176,39 +177,24 @@ def _headline(site: SiteTarget) -> list[tuple[str, str]]:
     """The landing card's numbers for the window, for the metrics charted."""
     series = site.series
     charted = set(series.coverage)
-    numbers: list[tuple[str, int | str]] = []
+    numbers: list[tuple[str, str]] = []
     if "pull_requests" in charted:
-        numbers.append(
-            ("Pull requests opened", _total(series, "pull_requests", "opened"))
-        )
-        numbers.append(("Pull requests merged", site.merged))
+        opened = _total(series, "pull_requests", "opened")
+        numbers.append(("Pull requests opened", figure(site, "pull_requests", opened)))
+        merged = figure(site, "pull_requests", site.merged)
+        numbers.append(("Pull requests merged", merged))
     if "issues" in charted:
-        numbers.append(("Issues opened", _total(series, "issues", "opened")))
-        numbers.append(("Issues closed", _total(series, "issues", "closed")))
+        for label, key in (("Issues opened", "opened"), ("Issues closed", "closed")):
+            numbers.append(
+                (label, figure(site, "issues", _total(series, "issues", key)))
+            )
     if "workflows" in charted:
-        numbers.append(("Workflow runs", _total(series, "workflows", "runs")))
-        numbers.append(("Jobs", _total(series, "workflows", "jobs")))
-    numbers.append(("Repositories in scope", series.repositories[-1]))
-    complete = sum(
-        all(series.coverage[metric][index] is Coverage.COMPLETE for metric in charted)
-        for index in range(len(series.days))
-    )
-    numbers.append(("Days covered", f"{complete} of {len(series.days)}"))
-    return [(label, str(value)) for label, value in numbers]
-
-
-def _coverage_note(metric: str, grades: Sequence[Coverage]) -> list[str]:
-    """The coverage lines of one metric; none when every day is complete."""
-    missing = sum(grade is Coverage.NONE for grade in grades)
-    partial = sum(grade is Coverage.PARTIAL for grade in grades)
-    lines = []
-    if missing:
-        lines.append(f"{_days(missing)} of {len(grades)} without data.")
-    if partial:
-        lines.append(f"{_days(partial)} of {len(grades)} with partial data.")
-    if missing and metric in _RUN_METRICS:
-        lines.append(HORIZON_NOTE)
-    return lines
+        runs = _total(series, "workflows", "runs")
+        numbers.append(("Workflow runs", figure(site, "workflows", runs)))
+        jobs = _total(series, "workflows", "jobs")
+        numbers.append(("Jobs", figure(site, "workflows", jobs, jobs=True)))
+    numbers.append(("Repositories in scope", str(series.repositories[-1])))
+    return numbers
 
 
 def _chart(
@@ -230,11 +216,20 @@ def _chart(
         width, height = image.size
     first, second = SERIES[metric]
     series = site.series
+    figures = [
+        figure(
+            site,
+            metric,
+            _total(series, metric, key, view),
+            key,
+            jobs=(metric, key) == ("workflows", "jobs"),
+            view=view,
+        )
+        for key in (first, second)
+    ]
     alt = (
         f"{site.target.owner} — {HEADINGS[metric].lower()} per day,"
-        f" {VIEW_LABELS[view]}, {_window(series)}:"
-        f" {_total(series, metric, first, view)} {first},"
-        f" {_total(series, metric, second, view)} {second}"
+        f" {VIEW_LABELS[view]}, {_window(series)}: {', '.join(figures)}"
     )
     return {
         "src": f"img/{shown.name}",
@@ -269,7 +264,7 @@ def _target_page(site: SiteTarget, config: Config, owner_dir: Path) -> dict[str,
                 "name": metric.replace("_", "-"),
                 "heading": HEADINGS[metric],
                 "views": views,
-                "notes": _coverage_note(metric, grades),
+                "notes": coverage_note(metric, grades),
             }
         )
     _lazy_after_first(view["chart"] for m in metrics for view in m["views"])
@@ -297,6 +292,7 @@ def _target_page(site: SiteTarget, config: Config, owner_dir: Path) -> dict[str,
         "downloads": downloads,
         "window": _window(site.series),
         "scope_rule": _scope_rule(site.target),
+        "coverage_lines": coverage_lines(site),
     }
 
 
@@ -325,6 +321,7 @@ def _card(
         "owner": site.target.owner,
         "href": f"{directory}/index.html",
         "headline": _headline(site),
+        "coverage_lines": coverage_lines(site),
         "charts": charts,
         "previews": previews,
         "scope_rule": _scope_rule(site.target),
