@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from dataclasses import astuple
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,27 @@ def test_run_day_counts_group_scheduled_runs_without_an_actor() -> None:
         RunDayCount(_day(2), "alice", "User", False, "failure", 1, 1),
         RunDayCount(_day(2), "alice", "User", False, "success", 2, 3),
     ]
+
+
+@pytest.mark.xfail(strict=True)
+def test_run_day_counts_group_dynamic_runs_without_an_actor() -> None:
+    with _store() as store:
+        store.upsert_runs(
+            [
+                _run(1, event="dynamic", actor="maintainer", jobs=1),
+                _run(2, event="dynamic", actor="other", jobs=2),
+                _run(3, event="schedule", jobs=4),
+                _run(4, event="workflow_run", jobs=8),
+            ]
+        )
+        rows = store.run_day_counts(_day(1), _day(9))
+        actors = store.actors()
+    assert [astuple(row) for row in rows] == [
+        (_day(2), None, None, "dynamic", "success", 2, 3),
+        (_day(2), None, None, "schedule", "success", 1, 4),
+        (_day(2), "alice", "User", None, "success", 1, 8),
+    ]
+    assert actors == [("alice", "User")]
 
 
 def test_days_missing_jobs_lists_concluded_runs_only() -> None:
