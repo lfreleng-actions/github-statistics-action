@@ -334,6 +334,17 @@ github-statistics config   show | check | path
 github-statistics cache    info | clear [--owner]
 ```
 
+Root option, given before the command:
+
+```text
+--log-level LEVEL      debug | info | warning | error (default info;
+                       env GHS_LOG_LEVEL). Progress goes to stderr
+                       with UTC timestamps: each collect step's start
+                       and end with the budget spent and left, and one
+                       line per repository per step. httpx, httpcore
+                       and matplotlib stay at warning unless debug.
+```
+
 Shared options (config first, then CLI overrides, as in GSR):
 
 ```text

@@ -57,7 +57,6 @@ def _invoke(*args: str, **env: str) -> Any:
     return runner.invoke(app, [*args, "config", "path"], env=env)
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize(
     ("args", "env", "level"),
     [
@@ -77,7 +76,6 @@ def test_the_root_option_sets_the_level(
     assert logging.getLogger().level == level
 
 
-@pytest.mark.xfail(strict=True)
 def test_third_party_loggers_stay_at_warning_by_default() -> None:
     """``httpx`` logs each request URL at INFO, so it stays quieter."""
     assert _invoke().exit_code == 0
@@ -117,7 +115,6 @@ async def _collect_logged(
     return list(caplog.records)
 
 
-@pytest.mark.xfail(strict=True)
 async def test_collect_logs_each_step_and_repository(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -146,7 +143,6 @@ async def test_collect_logs_each_step_and_repository(
     assert joined == {("incremental", "acme/a"), ("backfill", "acme/b")}
 
 
-@pytest.mark.xfail(strict=True)
 async def test_no_record_carries_the_token(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -158,7 +154,6 @@ async def test_no_record_carries_the_token(
     assert all(TOKEN not in str(r.args) for r in records)
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize("budgeted", [True, False])
 async def test_step_lines_count_rest_from_the_budget(
     caplog: pytest.LogCaptureFixture, budgeted: bool
@@ -181,7 +176,6 @@ async def test_step_lines_count_rest_from_the_budget(
     assert line.split("; ")[1].startswith(expected)
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_sweep_line_comes_when_its_repository_finishes(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -218,7 +212,6 @@ async def test_a_sweep_line_comes_when_its_repository_finishes(
     assert _logged(caplog) == {("sweep", "acme/a"), ("sweep", "acme/b")}
 
 
-@pytest.mark.xfail(strict=True)
 async def test_item_lines_alone_come_when_a_step_reading_nothing_ends(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -243,7 +236,6 @@ async def test_item_lines_alone_come_when_a_step_reading_nothing_ends(
     assert _logged(caplog) == {("incremental", "acme/a"), ("backfill", "acme/b")}
 
 
-@pytest.mark.xfail(strict=True)
 async def test_an_item_line_joins_its_runs_across_other_steps(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -281,7 +273,6 @@ async def test_an_item_line_joins_its_runs_across_other_steps(
     ]
 
 
-@pytest.mark.xfail(strict=True)
 async def test_a_phase_cut_short_lets_its_later_item_line_through(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -319,13 +310,7 @@ async def test_a_phase_cut_short_lets_its_later_item_line_through(
 
 
 @pytest.mark.parametrize(
-    ("counted", "cause"),
-    [
-        pytest.param(
-            False, "time limit reached", marks=pytest.mark.xfail(strict=True)
-        ),
-        (True, "budget spent"),
-    ],
+    ("counted", "cause"), [(False, "time limit reached"), (True, "budget spent")]
 )
 async def test_a_stop_names_the_time_limit_when_it_came_first(
     caplog: pytest.LogCaptureFixture, counted: bool, cause: str
@@ -353,7 +338,6 @@ def _logged(caplog: pytest.LogCaptureFixture) -> set[tuple[str, str]]:
     }
 
 
-@pytest.mark.xfail(strict=True)
 def test_stderr_respects_the_level_for_third_party_warnings(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
