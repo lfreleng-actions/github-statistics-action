@@ -417,6 +417,19 @@ def test_resolve_applies_and_validates_overrides() -> None:
         resolve(config_data=raw, overrides=Overrides(days=3))
 
 
+def test_budget_minutes_validates_and_the_flag_overrides_it() -> None:
+    """``budget.minutes`` is unset by default, at least 1, and the flag wins."""
+    from github_statistics.config import ConfigError, Overrides, loads, resolve
+
+    assert loads(_raw()).budget.minutes is None
+    assert loads(_raw(budget={"minutes": 30})).budget.minutes == 30
+    with pytest.raises(ConfigError, match=r"budget\.minutes"):
+        loads(_raw(budget={"minutes": 0}))
+    raw = _raw(budget={"minutes": 30})
+    config = resolve(config_data=raw, overrides=Overrides(max_minutes=5)).config
+    assert config.budget.minutes == 5
+
+
 @pytest.mark.parametrize(
     ("overrides", "flag"),
     [

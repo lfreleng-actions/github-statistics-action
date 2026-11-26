@@ -347,6 +347,7 @@ Shared options (config first, then CLI overrides, as in GSR):
 --output-dir DIR       site root (default ./site)
 --cache-dir DIR        store root (default $XDG_CACHE_HOME/github-statistics)
 --budget N             REST requests this run may spend (default 3000)
+--max-minutes N        minutes collection may take (default: no limit)
 --token-env NAME       environment variable holding the token
 --refresh              ignore watermarks; re-read the window
 --strict               exit non-zero on any unreadable repository
@@ -1009,7 +1010,13 @@ count, or dip into the reserve, by at most the requests in flight
 (the transport's concurrency), and overshoot its GraphQL points by at
 most the queries in flight. A response that carries no core count leaves
 the observed one unchanged, so while GitHub sends none, `budget.rest`
-alone bounds the run; exactness beyond that is a non-goal. A run that
+alone bounds the run; exactness beyond that is a non-goal. An optional
+time limit, `budget.minutes` or `--max-minutes`, counts from the
+command's start and, once passed, makes the budget report itself spent,
+so requests in flight finish, no retry waits past it, the collectors
+stop the same way and the
+summary marks the step "time limit reached", or notes the limit reached
+later when a count stopped an earlier step first. A run that
 exhausts its budget exits zero with a notice; coverage says what
 remains. Steps 3 and 4 are still never starved by step 5, which
 step 6 follows rather than replaces, so the most recent days are always
@@ -1583,6 +1590,7 @@ pinned older release never receives a flag it does not know:
 | `output_dir`                                                           | Site root (default `site`)                                                |
 | `cache_dir`                                                            | Store root (default `~/.cache/github-statistics`)                         |
 | `budget`                                                               | REST request budget for this run                                          |
+| `max_minutes`                                                          | Minutes collection may take; unset, no time limit                         |
 | `refresh`                                                              | Ignore watermarks (`run`)                                                 |
 | `strict`                                                               | Exit 2 when a repository was unreadable (`run`)                           |
 | `tool_version`                                                         | Override the runtime pin                                                  |

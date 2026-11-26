@@ -59,6 +59,10 @@ inputs:
     description: "REST requests this run may spend"
     required: false
     default: ""
+  max_minutes:
+    description: "Minutes collection may take; unset, no time limit"
+    required: false
+    default: ""
   refresh:
     description: "'true' to ignore watermarks and re-read the window"
     required: false
@@ -141,6 +145,7 @@ runs:
         GHSA_OUTPUT_DIR: ${{ inputs.output_dir }}
         GHSA_CACHE_DIR: ${{ inputs.cache_dir }}
         GHSA_BUDGET: ${{ inputs.budget }}
+        GHSA_MAX_MINUTES: ${{ inputs.max_minutes }}
         GHSA_REFRESH: ${{ inputs.refresh }}
         GHSA_STRICT: ${{ inputs.strict }}
         GHSA_ORG_BOTS: ${{ inputs.org_bots }}
@@ -245,6 +250,7 @@ runs:
         add --output-dir "$GHSA_OUTPUT_DIR"
         add --cache-dir "$GHSA_CACHE_DIR"
         add --budget "$GHSA_BUDGET"
+        add --max-minutes "$GHSA_MAX_MINUTES"
         if [ "$GHSA_COMMAND" = "run" ]; then
           add_switch --refresh "$GHSA_REFRESH" refresh
           add_switch --strict "$GHSA_STRICT" strict

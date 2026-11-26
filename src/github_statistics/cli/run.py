@@ -6,7 +6,9 @@ For each target in turn ``run`` clears the target's ``img/`` and
 ``data/`` directories, then collects, renders, exports and reads what
 the target's pages show; the pages and the landing page are written
 once, after every target. A spent budget is not a failure: rendering
-and the site go on, and the charts show the gaps. A rejected token or
+and the site go on, and the charts show the gaps. Neither is the time
+limit, which bounds collection alone: it counts from the command's
+start, and the stages that need no network always run. A rejected token or
 an invalid configuration stops the run before anything is rendered.
 Exit codes are those of ``collect``: 1 for an invalid configuration or
 a failed stage, 2 with ``--strict`` once the site is written if a
@@ -26,7 +28,13 @@ import typer
 from github_statistics.config import ConfigError, Resolution, Target, default_cache_dir
 from github_statistics.store import path_component, store_path
 
-from .collect import STRICT_EXIT, collect_outputs, collect_target, report
+from .collect import (
+    STRICT_EXIT,
+    collect_outputs,
+    collect_target,
+    collection_deadline,
+    report,
+)
 from .common import (
     API_HOST,
     ReadOnlyStore,
@@ -98,6 +106,7 @@ def run(
     except ConfigError as exc:
         raise fail(str(exc)) from None
     config = resolution.config
+    deadline = collection_deadline(config.budget.minutes)
     now = datetime.now(UTC)
     until = options.until or now.date() - timedelta(days=1)
     output_dir = Path(config.output.directory)
@@ -108,7 +117,12 @@ def run(
         clear_target_output(output_dir, target.owner)
         results.append(
             collect_target(
-                resolution, target, now=now, until=options.until, refresh=refresh
+                resolution,
+                target,
+                now=now,
+                until=options.until,
+                refresh=refresh,
+                deadline=deadline,
             )
         )
         _echo(render_targets(resolution, [target], until=until, now=now))
