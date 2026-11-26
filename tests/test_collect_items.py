@@ -671,7 +671,6 @@ async def test_an_item_updated_between_cursor_pages_loses_no_other_item() -> Non
         assert stored == {1: _at(5), 2: _at(2), 3: _at(3), 4: _at(4)}
 
 
-@pytest.mark.xfail(strict=True, reason="no guard on a link without a cursor yet")
 @respx.mock
 async def test_a_next_link_without_a_cursor_warns_once_and_drains(
     caplog: pytest.LogCaptureFixture,
