@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -60,14 +61,21 @@ def _listed(
 
 
 def _serve(pages: dict[str, list[list[dict[str, Any]]]]) -> respx.Route:
-    """Mock the listing: ``pages[since]`` in order, each linked to the next."""
+    """Mock the listing: ``pages[since]`` in order, each linked to the next.
+
+    Each link carries an ``after`` cursor and a ``page`` number, as
+    GitHub's do; the cursor decides the page.
+    """
 
     def respond(request: httpx.Request) -> httpx.Response:
         chunks = pages[request.url.params["since"]]
-        page = int(request.url.params.get("page", "1"))
+        after = request.url.params.get("after")
+        page = 1 if after is None else int(after.removeprefix("cursor:")) + 1
         headers = {}
         if page < len(chunks):
-            following = request.url.copy_merge_params({"page": page + 1})
+            following = request.url.copy_merge_params(
+                {"after": f"cursor:{page}", "page": page + 1}
+            )
             headers["link"] = f'<{following}>; rel="next"'
         return httpx.Response(200, json=chunks[page - 1], headers=headers)
 
@@ -555,7 +563,7 @@ async def test_an_unbudgeted_rate_limit_stops_one_repository(
     from github_statistics.client import Transport
     from github_statistics.scope import Repository, ResolvedScope
 
-    following = f"{LISTING}?page=2"
+    following = f"{LISTING}?after=cursor%3A1&page=2"
     respx.get(LISTING, params={"page": "2"}).respond(status, headers=headers)
     respx.get(LISTING).respond(
         200, json=[_listed(1, _at(3))], headers={"link": f'<{following}>; rel="next"'}
@@ -630,3 +638,60 @@ async def test_a_rejected_token_raises_even_with_the_budget_spent() -> None:
 
         assert listing.call_count == 0
         assert _watermark(store) is None
+
+
+@respx.mock
+async def test_an_item_updated_between_cursor_pages_loses_no_other_item() -> None:
+    listing = {n: _at(n) for n in (1, 2, 3, 4)}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        after = request.url.params.get("after")
+        rows = sorted((at, n) for n, at in listing.items())
+        if after is not None:
+            at, _, n = after.rpartition(",")
+            rows = [row for row in rows if row > (datetime.fromisoformat(at), int(n))]
+        page, headers = rows[:2], {}
+        if len(rows) > 2:
+            cursor = f"{page[-1][0].isoformat()},{page[-1][1]}"
+            following = request.url.copy_merge_params({"after": cursor, "page": 2})
+            headers["link"] = f'<{following}>; rel="next"'
+        # Item 1 is updated once its page is read, moving it to the end.
+        listing[1] = _at(5)
+        return httpx.Response(
+            200, json=[_listed(n, at) for at, n in page], headers=headers
+        )
+
+    respx.get(LISTING).mock(side_effect=respond)
+    with _store() as store:
+        result = await _sync(store)
+
+        assert result.drained is True
+        items = store.items_between(WINDOW, date(2026, 3, 9))
+        stored = {item.number: item.updated_at for item in items}
+        assert stored == {1: _at(5), 2: _at(2), 3: _at(3), 4: _at(4)}
+
+
+@pytest.mark.xfail(strict=True, reason="no guard on a link without a cursor yet")
+@respx.mock
+async def test_a_next_link_without_a_cursor_warns_once_and_drains(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", "1"))
+        headers = {}
+        if page < 3:
+            following = request.url.copy_merge_params({"page": page + 1})
+            headers["link"] = f'<{following}>; rel="next"'
+        return httpx.Response(200, json=[_listed(page, _at(page))], headers=headers)
+
+    respx.get(LISTING).mock(side_effect=respond)
+    with _store() as store, caplog.at_level(logging.WARNING):
+        result = await _sync(store)
+
+        assert result.drained is True
+        assert result.pages == 3
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "acme/a" in warnings[0].getMessage()
+        assert "position" in warnings[0].getMessage()
+        assert _coverage(store, "issues") == [(WINDOW, date(2026, 3, 9))]
