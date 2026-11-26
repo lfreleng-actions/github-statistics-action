@@ -24,6 +24,7 @@ from github_statistics.client import Budget, ClientError, Transport
 from github_statistics.config import ConfigError, resolve_token
 from github_statistics.scope import ResolvedScope, resolve_scope
 
+from .common import fail
 from .options import SharedOptions, shared_options
 
 
@@ -44,12 +45,6 @@ def _render(names: list[str], output: Format) -> str:
     return "\n".join(names)
 
 
-def _fail(message: str) -> typer.Exit:
-    """Report ``message`` on standard error; the exit to raise."""
-    typer.echo(f"error: {message}", err=True)
-    return typer.Exit(1)
-
-
 @shared_options
 def scope(
     options: SharedOptions,
@@ -61,9 +56,9 @@ def scope(
     try:
         config = options.resolve().config
     except ConfigError as exc:
-        raise _fail(str(exc)) from None
+        raise fail(str(exc)) from None
     if len(config.targets) != 1:
-        raise _fail(
+        raise fail(
             "scope resolves one owner at a time; select one with --org or --repo"
         )
     [target] = config.targets
@@ -81,14 +76,14 @@ def scope(
     try:
         resolved = asyncio.run(run())
     except (ClientError, httpx.HTTPError) as exc:
-        raise _fail(f"cannot resolve the scope of {target.owner}: {exc}") from None
+        raise fail(f"cannot resolve the scope of {target.owner}: {exc}") from None
 
     for drop in resolved.dropped:
         typer.echo(f"dropped {resolved.owner}/{drop.name}: {drop.reason}", err=True)
     for name in resolved.unresolved:
         typer.echo(f"warning: could not read {resolved.owner}/{name}", err=True)
     if resolved.unresolved:
-        raise _fail(
+        raise fail(
             f"the scope of {resolved.owner} is incomplete:"
             f" {len(resolved.unresolved)} repositories could not be read"
         )

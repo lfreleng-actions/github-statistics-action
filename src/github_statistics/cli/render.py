@@ -15,62 +15,18 @@ line.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime, timedelta
 from fnmatch import fnmatchcase
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import typer
 
-from github_statistics.client.transport import DEFAULT_API_URL
-from github_statistics.config import ConfigError, Target, default_cache_dir
-from github_statistics.store import SCHEMA_VERSION, Store, store_path
+from github_statistics.config import ConfigError, Resolution, Target, default_cache_dir
+from github_statistics.store import store_path
 
+from .common import API_HOST, ReadOnlyStore, StaleStoreError, fail
 from .options import SharedOptions, shared_options
-
-API_HOST = urlsplit(DEFAULT_API_URL).hostname or "api.github.com"
-
-
-class ReadOnlyStore(Store):
-    """A `Store` over a read-only connection to an existing file.
-
-    Unlike `Store`, opening it never creates the file or its directory
-    and never rebuilds a schema; any write raises `sqlite3.OperationalError`.
-    """
-
-    def __init__(self, path: Path) -> None:
-        """Open the store at ``path`` read-only."""
-        self.path = Path(path)
-        self._savepoints = 0
-        uri = self.path.resolve().as_uri() + "?mode=ro"
-        self._connection = sqlite3.connect(uri, uri=True, isolation_level=None)
-        self._connection.row_factory = sqlite3.Row
-
-    @contextmanager
-    def snapshot(self) -> Iterator[None]:
-        """Run the block's reads in one transaction, so all see one state of the file.
-
-        The connection is in autocommit mode, so without this a collection
-        committing between two queries could pair new counts with old coverage.
-        """
-        with self._transaction():
-            yield
-
-    def scoped_between(self, first: date, last: date) -> list[str]:
-        """The repositories in scope on any day from ``first`` to ``last``, sorted.
-
-        An interval that opened and closed on one day holds no day, so it
-        does not count.
-        """
-        rows = self._connection.execute(
-            "SELECT DISTINCT repo FROM scope WHERE from_day <= ?"
-            " AND (to_day IS NULL OR (to_day > ? AND to_day > from_day))"
-            " ORDER BY repo",
-            (last.isoformat(), first.isoformat()),
-        )
-        return [row[0] for row in rows]
 
 
 def _matches(name: str, patterns: tuple[str, ...]) -> bool:
@@ -90,46 +46,36 @@ def _unselected(target: Target, repositories: list[str]) -> list[str]:
     return dropped
 
 
-def _fail(message: str) -> typer.Exit:
-    """Report ``message`` on standard error; the exit to raise."""
-    typer.echo(f"error: {message}", err=True)
-    return typer.Exit(1)
+def render_targets(
+    resolution: Resolution,
+    targets: Sequence[Target],
+    *,
+    until: date,
+    now: datetime,
+) -> Iterator[Path]:
+    """Render the charts of ``targets``; yield each file as it is written.
 
-
-@shared_options
-def render(options: SharedOptions) -> None:
-    """Render the charts of every target from the store; needs no token."""
+    ``until`` ends the window and ``now`` dates the footers. Every store
+    is read and checked before the first chart is drawn, so a failure
+    there, raised as the exit `fail` builds, leaves no partial output.
+    """
     # Imported here so other commands start without loading matplotlib.
     from github_statistics.render.charts import render_target
     from github_statistics.series import build_series
 
-    try:
-        resolution = options.resolve()
-    except ConfigError as exc:
-        raise _fail(str(exc)) from None
     config = resolution.config
-    now = datetime.now(UTC)
-    until = options.until or now.date() - timedelta(days=1)
     root = Path(config.cache.directory or default_cache_dir())
     stores = {
-        target.owner: store_path(root, API_HOST, target.owner)
-        for target in config.targets
+        target.owner: store_path(root, API_HOST, target.owner) for target in targets
     }
     for owner, path in stores.items():
         if not path.is_file():
-            raise _fail(f"no store for {owner} at {path}: run `collect` first")
-    # Every store is read and checked before any chart is drawn, so a
-    # failure leaves no partial output.
+            raise fail(f"no store for {owner} at {path}: run `collect` first")
     built = []
-    for target in config.targets:
+    for target in targets:
         path = stores[target.owner]
         try:
-            with ReadOnlyStore(path) as store, store.snapshot():
-                if store.schema_version() != SCHEMA_VERSION:
-                    raise _fail(
-                        f"the store at {path} has another schema version:"
-                        " run `collect` first"
-                    )
+            with ReadOnlyStore(path) as store:
                 series = build_series(
                     store,
                     config,
@@ -140,10 +86,14 @@ def render(options: SharedOptions) -> None:
                 dropped = _unselected(
                     target, store.scoped_between(series.days[0], series.days[-1])
                 )
+        except StaleStoreError:
+            raise fail(
+                f"the store at {path} has another schema version: run `collect` first"
+            ) from None
         except sqlite3.DatabaseError as exc:
-            raise _fail(f"cannot read the store at {path}: {exc}") from None
+            raise fail(f"cannot read the store at {path}: {exc}") from None
         if dropped:
-            raise _fail(
+            raise fail(
                 f"the store for {target.owner} holds {', '.join(dropped)} in the"
                 " window, outside the repository selection, and render cannot"
                 " leave it out: render without the selection, or `collect` the"
@@ -156,7 +106,21 @@ def render(options: SharedOptions) -> None:
                 series, config, target, Path(config.output.directory), now=now
             )
         except ValueError as exc:
-            raise _fail(str(exc)) from None
+            raise fail(str(exc)) from None
         for chart in charts:
-            for written in chart.paths:
-                typer.echo(str(written))
+            yield from chart.paths
+
+
+@shared_options
+def render(options: SharedOptions) -> None:
+    """Render the charts of every target from the store; needs no token."""
+    try:
+        resolution = options.resolve()
+    except ConfigError as exc:
+        raise fail(str(exc)) from None
+    now = datetime.now(UTC)
+    until = options.until or now.date() - timedelta(days=1)
+    for written in render_targets(
+        resolution, resolution.config.targets, until=until, now=now
+    ):
+        typer.echo(str(written))

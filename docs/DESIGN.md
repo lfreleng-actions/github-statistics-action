@@ -275,7 +275,9 @@ configuration change (a new bot name, a new palette) costs no requests.
 ```text
 src/github_statistics/
   cli/            Typer app: scope, collect, render, site, run, export,
-                  doctor, config, cache
+                  doctor, config, cache; common.py (the store opened
+                  for reading, failures, $GITHUB_OUTPUT and step
+                  summary writers)
   config/         schema.py (jsonschema), models.py (frozen dataclasses),
                   loader.py (file, variable, XDG default)
   client/         transport.py, policy.py, accounting.py, cooldown.py,

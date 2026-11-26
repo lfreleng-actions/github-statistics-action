@@ -306,7 +306,6 @@ def test_clears_each_targets_charts_and_data_alone(
     assert all(path.exists() for path in kept)
 
 
-@pytest.mark.xfail(strict=True, reason="the shared output writer does not exist yet")
 @pytest.mark.parametrize(
     ("key", "value"),
     [
@@ -323,6 +322,7 @@ def test_write_outputs_refuses_injection(
 ) -> None:
     """A key or value able to start another output writes nothing and fails."""
     import typer
+
     from github_statistics.cli.common import write_outputs
 
     output = tmp_path / "output"
@@ -334,7 +334,6 @@ def test_write_outputs_refuses_injection(
     assert not output.exists()
 
 
-@pytest.mark.xfail(strict=True, reason="the shared output writer does not exist yet")
 def test_write_outputs_appends_plain_pairs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

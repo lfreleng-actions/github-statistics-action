@@ -41,19 +41,13 @@ from github_statistics.store import store_path
 
 from .cache import info as cache_info
 from .collect import AUTH_EXIT
+from .common import API_HOST, ReadOnlyStore, StaleStoreError, fail
 from .config import _redact
-from .export import API_HOST, ReadOnlyStore, StaleStoreError, _fail
 from .options import SharedOptions, shared_options
 
 CONFIG_EXIT = 4
 IDENTITY_KEYS = ("org_bots", "external_bots", "members", "member_orgs", "ignore_logins")
 BOT_KEYS = "identities.org_bots or identities.external_bots"
-
-
-def _exit(message: str, code: int) -> typer.Exit:
-    """Report ``message`` as `_fail` does; the exit with ``code`` to raise."""
-    _fail(message)
-    return typer.Exit(code)
 
 
 def _configuration(resolution: Resolution) -> None:
@@ -183,7 +177,7 @@ def doctor(
     try:
         resolution = options.resolve()
     except ConfigError as exc:
-        raise _exit(str(exc), CONFIG_EXIT) from None
+        raise fail(str(exc), CONFIG_EXIT) from None
     config = resolution.config
     _configuration(resolution)
     cache = Path(config.cache.directory or default_cache_dir())
@@ -201,7 +195,7 @@ def doctor(
             asyncio.run(_network(target, config, known))
         except AuthError:
             message = f"GitHub rejected the token in ${variable} (HTTP 401)"
-            raise _exit(message, AUTH_EXIT) from None
+            raise fail(message, AUTH_EXIT) from None
     try:
         cache_info(cache_dir=str(cache), config=None, config_data=None)
     except sqlite3.DatabaseError as exc:
