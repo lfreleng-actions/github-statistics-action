@@ -3,10 +3,12 @@
 """One target's budgeted, self-healing sync (design §6.5).
 
 `collect` runs the collectors in a fixed order, sharing the
-transport's one budget: scope, public members, the incremental reads,
-enrichment, backfill, enrichment of what the backfill stored, then the
-re-run sweep. The incremental reads and the first enrichment always
-come before backfill, so yesterday is complete while history still
+transport's one budget: scope, public members, every repository's
+item listing, the recent runs, enrichment, the runs backfill, job
+counts of what that backfill stored, then the re-run sweep. Items come
+first because their listing costs a small fraction of a cold runs
+read, and the recent runs and the first enrichment always come before
+the runs backfill, so yesterday is complete while history still
 fills in. Each step's listing sync ends before the next step starts,
 so enrichment never runs alongside a listing (design §6.3).
 """
@@ -14,7 +16,14 @@ so enrichment never runs alongside a listing (design §6.3).
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Awaitable, Callable, Coroutine, Iterable, Mapping
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Coroutine,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -189,6 +198,8 @@ async def _sync(steps: Steps, transport: Transport, store: Store, plan: _Plan) -
 
     if plan.items and later:
         await items(INCREMENTAL, later)
+    if plan.items and first:
+        await items(BACKFILL, first)
     if plan.runs:
         finished = await each(
             steps, INCREMENTAL, (guarded(sync, sync.recent) for sync in syncs)
@@ -200,12 +211,10 @@ async def _sync(steps: Steps, transport: Transport, store: Store, plan: _Plan) -
         steps,
         transport,
         store,
-        plan.keys if plan.items else [],
         plan.keys if plan.jobs else [],
+        items=plan.keys if plan.items else [],
     )
 
-    if plan.items and first:
-        await items(BACKFILL, first)
     stored: list[str] = []
     if current:
         before = {sync.key: sync.result().runs for sync in current}
@@ -218,13 +227,7 @@ async def _sync(steps: Steps, transport: Transport, store: Store, plan: _Plan) -
         result = sync.result()
         steps.runs(sync.key, result.unreadable, result.stalled)
 
-    await _enrich(
-        steps,
-        transport,
-        store,
-        first if plan.items else [],
-        stored if plan.jobs else [],
-    )
+    await _enrich(steps, transport, store, stored if plan.jobs else [])
 
     if current:
         await _sweep(steps, transport, store, [sync.key for sync in current], now)
@@ -234,11 +237,12 @@ async def _enrich(
     steps: Steps,
     transport: Transport,
     store: Store,
-    items: list[str],
     runs: list[str],
+    items: Sequence[str] = (),
 ) -> None:
     """Steps 4 and 6: enrich the items of ``items``, then count the jobs of ``runs``.
 
+    Step 6 passes no ``items``: every item listing ends before step 4.
     Either list may be empty, and skips its half. Reports the
     repositories they failed: an id that failed alone, unlike one the
     budget left, makes the repository holding it unreadable.
@@ -302,12 +306,11 @@ async def collect(
     The window is ``config.window.days`` days ending on ``until``,
     by default the day before ``now``, in UTC; ``now`` stays the time
     of the reads. Steps: resolve the scope and apply it to the store;
-    read public members; the incremental reads of items, from
-    repositories with a watermark, then of runs; enrich items, then
-    count jobs; backfill, first item syncs then runs; enrich again the
-    items of those first syncs and count the jobs of the runs the
-    backfill stored, whatever REST budget it left; the re-run sweep,
-    where due. A disabled metric's collectors do not run. An empty scope
+    read public members; list the items of every repository, from its
+    watermark or, with none yet, as its first sync; read the recent
+    runs; enrich items, then count jobs; backfill runs; count the jobs
+    of the runs the backfill stored, whatever REST budget it left; the
+    re-run sweep, where due. A disabled metric's collectors do not run. An empty scope
     makes no call after its resolution, and a scope the budget stops
     applies nothing. A repository whose read outlasts its retries is
     unreadable, and the outage ends its step; the repositories that

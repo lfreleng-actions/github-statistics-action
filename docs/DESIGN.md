@@ -905,28 +905,29 @@ default, and each read still runs up to the present:
    to the store. An empty scope makes no further call.
 2. **Members**: read the public member list of every member
    organisation (every page, §7.1).
-3. **Incremental sync** from the watermarks: items for every
-   repository that has an item watermark, then the recent runs of
-   every repository. On a quiet repository this is one conditional
+3. **Item listing, then incremental runs**: the items of every
+   repository, from its item watermark where it has one, else as its
+   first item sync (reported as backfill), then the recent runs of
+   every repository from their watermarks. Items come first because
+   the whole item listing costs a small fraction of a cold runs read
+   (§6.6), so a runs read that spends the budget never leaves the
+   items unlisted. On a quiet repository each read is one conditional
    request per metric, answered `304` at no rate-limit cost (GitHub
    waives the charge for an authenticated request alone).
 4. **Enrichment** of new and updated pull requests (reviews, mergers,
    closers) and new runs (job counts) by GraphQL batches; cheap, and
-   bounded by the day's activity. Items enter enrichment once their
-   listing has stored them, so step 6 enriches the items a first sync
-   stores in backfill.
-5. **Backfill**: the first item sync of each repository with no item
-   watermark yet, then the oldest uncovered slice of the window for
-   any repository whose `oldest` for runs has not reached the window
+   bounded by the day's activity. Every item listing has ended by
+   now, so this enriches the items a first sync stores too.
+5. **Backfill**: the oldest uncovered slice of the window for any
+   repository whose `oldest` for runs has not reached the window
    start, newest slice first, until the budget runs out or coverage
    completes.
-6. **Enrichment of the backfill**: step 4 again, once every backfill
-   listing has ended and before the sweep, over the items of the
-   repositories step 5 gave a first item sync, then the job counts of
-   those whose run backfill stored runs. A run whose backfill stored
-   nothing skips it, so a warm day costs nothing extra. It runs even
-   when step 5 spent the REST budget, since GraphQL draws on its own
-   pool.
+6. **Job counts of the backfill**: once the runs backfill has ended
+   and before the sweep, step 4's job counts again, for the
+   repositories whose run backfill stored runs. A run whose backfill
+   stored nothing skips it, so a warm day costs nothing extra. It runs
+   even when step 5 spent the REST budget, since GraphQL draws on its
+   own pool.
 7. **Sweep** for late re-runs (§6.4), where due, for each repository
    whose recent runs step 3 read in full.
 
