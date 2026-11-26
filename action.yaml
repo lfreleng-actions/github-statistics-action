@@ -1,53 +1,289 @@
 ---
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: 2025 The Linux Foundation
+# SPDX-FileCopyrightText: 2026 The Linux Foundation
 
-# actions-template
-name: "🛠️ Actions Template"
-description: "Description of action"
-# Any relevant notes/observations can go here
+# github-statistics-action
+name: "📊 GitHub Statistics"
+description: "Daily activity charts for GitHub organisations and repositories"
+# Every input defaults to the empty string, and a flag reaches the tool
+# only when its input is set: a non-empty default would be passed to
+# whichever published release the runtime pin installs, and an older
+# release would fail on a flag it does not know.
 
 inputs:
-  input:
-    description: "Description of input"
-    required: true
+  command:
+    description: "'run' (the default) or 'scope'"
+    required: false
+    default: ""
+  config:
+    description: "Configuration as JSON, raw or base64"
+    required: false
+    default: ""
+  org:
+    description: "Owner to report on"
+    required: false
+    default: ""
+  repositories:
+    description: "Repository names or globs to keep (comma or space-separated)"
+    required: false
+    default: ""
+  exclude:
+    description: "Repository names or globs to drop (comma or space-separated)"
+    required: false
+    default: ""
+  repo:
+    description: "owner/name for repository scope"
+    required: false
+    default: ""
+  token:
+    description: "Token to read GitHub with (default: the job's github.token)"
+    required: false
+    default: ""
+  days:
+    description: "Window length in days"
+    required: false
+    default: ""
+  until:
+    description: "Last day of the window, YYYY-MM-DD (default: yesterday, UTC)"
+    required: false
+    default: ""
+  output_dir:
+    description: "Site root"
+    required: false
+    default: ""
+  cache_dir:
+    description: "Store root"
+    required: false
+    default: ""
+  budget:
+    description: "REST requests this run may spend"
+    required: false
+    default: ""
+  refresh:
+    description: "'true' to ignore watermarks and re-read the window"
+    required: false
+    default: ""
+  strict:
+    description: "'true' to exit 2 when a repository was unreadable"
+    required: false
+    default: ""
+  org_bots:
+    description: "The organisation's own bots; replaces the configured list"
+    required: false
+    default: ""
+  external_bots:
+    description: "Outside bots; replaces the configured list"
+    required: false
+    default: ""
+  members:
+    description: "Humans counted as members; replaces the configured list"
+    required: false
+    default: ""
+  member_orgs:
+    description: "Organisations whose public members count; replaces the list"
+    required: false
+    default: ""
+  ignore_logins:
+    description: "Accounts left out; replaces the configured list"
+    required: false
+    default: ""
+  tool_version:
+    description: "github-statistics release to run instead of the runtime pin"
+    required: false
+    default: ""
+  use_local_source:
+    description: "'true' to run the action's own source (as pull requests do)"
+    required: false
+    default: ""
 
 outputs:
-  output:
-    description: "Description of output"
-    value: ${{ steps.code.outputs.output }}
+  site_dir:
+    description: "Directory holding the site (run)"
+    value: ${{ steps.statistics.outputs.site_dir }}
+  coverage_complete:
+    description: "'true' when every day of every metric is complete (run)"
+    value: ${{ steps.statistics.outputs.coverage_complete }}
+  gap_days:
+    description: "Days the charts show as gaps, summed over targets (run)"
+    value: ${{ steps.statistics.outputs.gap_days }}
+  requests_used:
+    description: "REST requests the run spent (run)"
+    value: ${{ steps.statistics.outputs.requests_used }}
+  unclassified_bots:
+    description: "Comma-separated bots named in no identity list (run)"
+    value: ${{ steps.statistics.outputs.unclassified_bots }}
+  repositories:
+    description: "Comma-separated public repositories in scope (scope)"
+    value: ${{ steps.statistics.outputs.repositories }}
+  repository_count:
+    description: "Number of public repositories in scope (scope)"
+    value: ${{ steps.statistics.outputs.repository_count }}
 
 runs:
   using: "composite"
   steps:
-    - name: "Friendly Name"
-      id: code
+    # yamllint disable-line rule:line-length
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+
+    - name: "GitHub statistics"
+      id: statistics
       shell: bash
       env:
-        INPUT_VALUE: ${{ inputs.input }}
+        GHSA_COMMAND: ${{ inputs.command }}
+        GHSA_CONFIG: ${{ inputs.config }}
+        GHSA_ORG: ${{ inputs.org }}
+        GHSA_REPOSITORIES: ${{ inputs.repositories }}
+        GHSA_EXCLUDE: ${{ inputs.exclude }}
+        GHSA_REPO: ${{ inputs.repo }}
+        GITHUB_TOKEN: ${{ inputs.token || github.token }}
+        GHSA_DAYS: ${{ inputs.days }}
+        GHSA_UNTIL: ${{ inputs.until }}
+        GHSA_OUTPUT_DIR: ${{ inputs.output_dir }}
+        GHSA_CACHE_DIR: ${{ inputs.cache_dir }}
+        GHSA_BUDGET: ${{ inputs.budget }}
+        GHSA_REFRESH: ${{ inputs.refresh }}
+        GHSA_STRICT: ${{ inputs.strict }}
+        GHSA_ORG_BOTS: ${{ inputs.org_bots }}
+        GHSA_EXTERNAL_BOTS: ${{ inputs.external_bots }}
+        GHSA_MEMBERS: ${{ inputs.members }}
+        GHSA_MEMBER_ORGS: ${{ inputs.member_orgs }}
+        GHSA_IGNORE_LOGINS: ${{ inputs.ignore_logins }}
+        GHSA_TOOL_VERSION: ${{ inputs.tool_version }}
+        GHSA_USE_LOCAL_SOURCE: ${{ inputs.use_local_source }}
+        GHSA_EVENT_NAME: ${{ github.event_name }}
       run: |
-        # Friendly Name
-        input="$INPUT_VALUE"
-        if [ -z "$input" ]; then
-          echo "Error: mandatory input was not set/configured ❌"
+        # GitHub statistics
+        set -euo pipefail
+
+        error() {
+          echo "::error::$1"
           exit 1
+        }
+
+        # The token reaches the tool as GITHUB_TOKEN, the tool's default
+        # token_env, through the environment alone: never on a command
+        # line or in the log.
+
+        case "${GHSA_COMMAND:-run}" in
+          run | scope) GHSA_COMMAND="${GHSA_COMMAND:-run}" ;;
+          *) error "command must be 'run' or 'scope'" ;;
+        esac
+
+        # Pull requests run the action's own source, so a change is tested
+        # before any release carries it.
+        if [ "$GHSA_EVENT_NAME" = "pull_request" ] ||
+          [ "$GHSA_USE_LOCAL_SOURCE" = "true" ]; then
+          GHSA_SOURCE="$GITHUB_ACTION_PATH"
+          if [ ! -e "$GITHUB_ACTION_PATH/.git" ]; then
+            export SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0"
+          fi
+        elif [ -n "$GHSA_TOOL_VERSION" ]; then
+          if [[ ! "$GHSA_TOOL_VERSION" =~ ^[A-Za-z0-9.+!_-]+$ ]]; then
+            error "tool_version is not a version"
+          fi
+          GHSA_SOURCE="github-statistics==${GHSA_TOOL_VERSION}"
+        else
+          GHSA_PIN_FILE="$GITHUB_ACTION_PATH/.github/runtime-pin/requirements.txt"
+          if [ ! -f "$GHSA_PIN_FILE" ]; then
+            error "runtime pin file not found: $GHSA_PIN_FILE"
+          fi
+          GHSA_SOURCE="$(
+            grep -m1 -E '^github-statistics==' "$GHSA_PIN_FILE" || true
+          )"
+          GHSA_SOURCE="${GHSA_SOURCE%%[[:space:]#]*}"
+          if [ -z "$GHSA_SOURCE" ]; then
+            error "no github-statistics== pin in $GHSA_PIN_FILE"
+          fi
         fi
 
-        # Write the output using the multiline heredoc format with a random
-        # delimiter so that an input containing newlines cannot inject
-        # additional keys into $GITHUB_OUTPUT (output-file injection). The
-        # delimiter is built from shell-builtin randomness (no external
-        # tools such as openssl/uuidgen, which are not guaranteed on
-        # self-hosted runners) and regenerated until it is provably absent
-        # from the value being emitted.
-        delimiter="ghadelim_${RANDOM}${RANDOM}${RANDOM}${RANDOM}"
-        while [[ "$input" == *"$delimiter"* ]]; do
-          delimiter="ghadelim_${RANDOM}${RANDOM}${RANDOM}${RANDOM}"
+        GHSA_ARGS=("$GHSA_COMMAND")
+
+        # Add "--flag value" when the value is non-empty.
+        add() {
+          if [ -n "$2" ]; then
+            GHSA_ARGS+=("$1" "$2")
+          fi
+        }
+
+        # Add "--flag item" for each item of a comma-, space- or
+        # newline-separated list.
+        add_list() {
+          local item
+          local -a items
+          IFS=',' read -r -a items <<< "${2//[[:space:]]/,}"
+          for item in "${items[@]}"; do
+            if [ -n "$item" ]; then
+              GHSA_ARGS+=("$1" "$item")
+            fi
+          done
+        }
+
+        # Add "--flag" when the value is 'true'.
+        add_switch() {
+          case "$2" in
+            true) GHSA_ARGS+=("$1") ;;
+            "" | false) ;;
+            *) error "$3 must be 'true' or 'false'" ;;
+          esac
+        }
+
+        # Fail when a switch 'run' alone takes is set for 'scope'.
+        refuse_switch() {
+          case "$1" in
+            "" | false) ;;
+            *) error "$2 applies to command 'run' only" ;;
+          esac
+        }
+
+        add --config-data "$GHSA_CONFIG"
+        add_list --org "$GHSA_ORG"
+        add_list --include "$GHSA_REPOSITORIES"
+        add_list --exclude "$GHSA_EXCLUDE"
+        add_list --repo "$GHSA_REPO"
+        add --days "$GHSA_DAYS"
+        add --until "$GHSA_UNTIL"
+        add --output-dir "$GHSA_OUTPUT_DIR"
+        add --cache-dir "$GHSA_CACHE_DIR"
+        add --budget "$GHSA_BUDGET"
+        if [ "$GHSA_COMMAND" = "run" ]; then
+          add_switch --refresh "$GHSA_REFRESH" refresh
+          add_switch --strict "$GHSA_STRICT" strict
+        else
+          # scope takes neither switch; refuse one that is set rather
+          # than let the tool fail on an unknown option.
+          refuse_switch "$GHSA_REFRESH" refresh
+          refuse_switch "$GHSA_STRICT" strict
+        fi
+        add_list --org-bots "$GHSA_ORG_BOTS"
+        add_list --external-bots "$GHSA_EXTERNAL_BOTS"
+        add_list --members "$GHSA_MEMBERS"
+        add_list --member-orgs "$GHSA_MEMBER_ORGS"
+        add_list --ignore-logins "$GHSA_IGNORE_LOGINS"
+
+        if [ "$GHSA_COMMAND" = "run" ]; then
+          # run writes its own outputs to $GITHUB_OUTPUT.
+          uvx --from "$GHSA_SOURCE" github-statistics "${GHSA_ARGS[@]}"
+          exit 0
+        fi
+
+        GHSA_ARGS+=(--format csv)
+        GHSA_NAMES="$(
+          uvx --from "$GHSA_SOURCE" github-statistics "${GHSA_ARGS[@]}"
+        )"
+        GHSA_COUNT=0
+        if [ -n "$GHSA_NAMES" ]; then
+          IFS=',' read -r -a GHSA_LIST <<< "$GHSA_NAMES"
+          GHSA_COUNT="${#GHSA_LIST[@]}"
+        fi
+        # Repository names hold no line break, but write the multiline form
+        # with a fresh delimiter anyway, so no value can inject an output.
+        GHSA_DELIMITER="ghadelim_${RANDOM}${RANDOM}${RANDOM}${RANDOM}"
+        while [[ "$GHSA_NAMES" == *"$GHSA_DELIMITER"* ]]; do
+          GHSA_DELIMITER="ghadelim_${RANDOM}${RANDOM}${RANDOM}${RANDOM}"
         done
         {
-          printf '%s<<%s\n' 'output' "$delimiter"
-          printf '%s\n' "$input"
-          printf '%s\n' "$delimiter"
+          printf 'repositories<<%s\n%s\n%s\n' \
+            "$GHSA_DELIMITER" "$GHSA_NAMES" "$GHSA_DELIMITER"
+          printf 'repository_count=%s\n' "$GHSA_COUNT"
         } >> "$GITHUB_OUTPUT"
-        echo "Action received: $input ✅"
-        echo "Action received: $input ✅" >> "$GITHUB_STEP_SUMMARY"
+        echo "Scope: $GHSA_COUNT repositories ✅"

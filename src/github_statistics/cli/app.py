@@ -18,6 +18,7 @@ from .config import config_app
 from .doctor import doctor
 from .export import export
 from .render import render
+from .run import run
 from .scope import scope
 from .site import site
 
@@ -38,6 +39,7 @@ app.command()(export)
 app.command(name="collect")(collect_command)
 app.command()(render)
 app.command()(site)
+app.command()(run)
 
 
 def _version_callback(value: bool) -> None:

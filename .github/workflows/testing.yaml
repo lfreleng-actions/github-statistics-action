@@ -24,9 +24,14 @@ jobs:
   tests:
     name: "Test local GitHub Action"
     runs-on: ubuntu-latest
+    # The read permissions of design section 9.4 for a single repository.
     permissions:
+      actions: read # workflow runs
+      checks: read # job counts from check suites
       contents: read
-    timeout-minutes: 10 # Increase this timeout value as needed
+      issues: read # issues and their events
+      pull-requests: read # pull requests and their reviews
+    timeout-minutes: 20
     steps:
       # Load the egress allow-list out-of-band from the
       # organisation's .github repository and publish it as
@@ -50,41 +55,56 @@ jobs:
         with:
           persist-credentials: false
 
-      # Perform setup prior to running test(s)
-      - name: "Testing setup step"
-        shell: bash
-        run: |
-          # Testing setup step
-          echo "Testing setup step"
-          echo "Testing setup step/summary output" >> "$GITHUB_STEP_SUMMARY"
-
+      # Collect, render and build the site for this repository alone,
+      # from the checked-out source, on a budget the job can afford.
       - name: "Running local action: ${{ github.repository }}"
+        id: statistics
         uses: $/
         with:
-          input: "test input 💬"
+          repo: ${{ github.repository }}
+          token: ${{ github.token }}
+          use_local_source: "true"
+          budget: "200"
+          output_dir: site
 
-      - name: "Validated local action: ${{ github.repository }}"
+      - name: "Validate the site"
         shell: bash
         env:
-          REPO: ${{ github.repository }}
+          SITE_DIR: ${{ steps.statistics.outputs.site_dir }}
+          REQUESTS_USED: ${{ steps.statistics.outputs.requests_used }}
         run: |
-          # Local action validation
-          echo "Validated local action: $REPO"
-          echo "Validation step summary output" >> "$GITHUB_STEP_SUMMARY"
+          # Validate the site
+          if [ ! -f site/index.html ]; then
+            echo "Error: site/index.html is missing ❌"
+            exit 1
+          fi
+          echo "Site: $SITE_DIR, requests used: $REQUESTS_USED ✅"
 
       # yamllint disable-line rule:line-length
-      - name: "Running local action: ${{ github.repository }} [Override Failure]"
-        uses: $/
-        id: failure
-        continue-on-error: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          invalid_input: "Some garbage"
+          name: github-statistics-site
+          path: site/
+          if-no-files-found: error
 
-      # Failure testing is also important
-      - name: "Error if step above did NOT fail"
-        if: steps.failure.outcome == 'success'
+      - name: "Running local action: ${{ github.repository }} [scope]"
+        id: scope
+        uses: $/
+        with:
+          command: scope
+          repo: ${{ github.repository }}
+          token: ${{ github.token }}
+          use_local_source: "true"
+
+      - name: "Validate the scope"
         shell: bash
+        env:
+          REPOSITORY_COUNT: ${{ steps.scope.outputs.repository_count }}
+          REPOSITORIES: ${{ steps.scope.outputs.repositories }}
         run: |
-          # Error if step above did NOT fail
-          echo "Error: previous test step did NOT fail ❌"
-          exit 1
+          # Validate the scope
+          if [ "$REPOSITORY_COUNT" != "1" ]; then
+            echo "Error: expected 1 repository, got '$REPOSITORY_COUNT' ❌"
+            exit 1
+          fi
+          echo "Scope: $REPOSITORIES ✅"

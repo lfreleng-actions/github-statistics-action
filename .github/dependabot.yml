@@ -30,3 +30,13 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 15
+  - package-ecosystem: "pip"
+    directory: "/.github/runtime-pin"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "Chore(deps)"
+    # Daily, so a release reaches the pin once its cooldown ends.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 15

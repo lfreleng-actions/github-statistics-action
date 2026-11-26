@@ -14,17 +14,29 @@ written, one per line.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
-from github_statistics.config import ConfigError, ResolvedIdentities, default_cache_dir
+from github_statistics.config import (
+    Config,
+    ConfigError,
+    Resolution,
+    ResolvedIdentities,
+    Target,
+    default_cache_dir,
+)
 from github_statistics.store import Store, store_path
 
-from .export import API_HOST, ReadOnlyStore, StaleStoreError, _fail
+from .common import API_HOST, ReadOnlyStore, StaleStoreError, fail
 from .options import SharedOptions, shared_options
 from .render import _unselected
+
+if TYPE_CHECKING:
+    from github_statistics.site import SiteTarget
 
 
 def _merged(
@@ -50,13 +62,14 @@ def _merged(
     )
 
 
-@shared_options
-def site(options: SharedOptions) -> None:
-    """Write the HTML pages of every target from the store; needs no token.
+def site_targets(
+    resolution: Resolution, targets: Sequence[Target], *, until: date
+) -> list[SiteTarget]:
+    """Read what the pages of ``targets`` show from their stores, up to ``until``.
 
-    The output directory must hold the charts and data of the same run,
-    from `render` and `export`; site links them and does not check their
-    freshness.
+    Every store is read before any page is written; a missing, stale or
+    unreadable store, or a selection narrower than the store, raises the
+    exit `fail` builds.
     """
     # Imported here so other commands start without loading matplotlib.
     from github_statistics.series import (
@@ -64,25 +77,18 @@ def site(options: SharedOptions) -> None:
         build_repositories,
         build_series,
     )
-    from github_statistics.site import SiteTarget, build_site
+    from github_statistics.site import SiteTarget
 
-    try:
-        resolution = options.resolve()
-    except ConfigError as exc:
-        raise _fail(str(exc)) from None
     config = resolution.config
-    now = datetime.now(UTC)
-    until = options.until or now.date() - timedelta(days=1)
     root = Path(config.cache.directory or default_cache_dir())
     stores = {
-        target.owner: store_path(root, API_HOST, target.owner)
-        for target in config.targets
+        target.owner: store_path(root, API_HOST, target.owner) for target in targets
     }
     for owner, path in stores.items():
         if not path.is_file():
-            raise _fail(f"no store for {owner} at {path}: run `collect` first")
+            raise fail(f"no store for {owner} at {path}: run `collect` first")
     built = []
-    for target in config.targets:
+    for target in targets:
         path = stores[target.owner]
         identities = resolution.identities_for(target)
         try:
@@ -98,12 +104,12 @@ def site(options: SharedOptions) -> None:
                 )
                 merged = _merged(store, target.owner, series.days, identities)
         except sqlite3.DatabaseError as exc:
-            raise _fail(f"cannot read the store at {path}: {exc}") from None
+            raise fail(f"cannot read the store at {path}: {exc}") from None
         except StaleStoreError:
-            raise _fail(f"the store at {path} is stale: run `collect` first") from None
+            raise fail(f"the store at {path} is stale: run `collect` first") from None
         dropped = _unselected(target, [row.repo for row in repositories])
         if dropped:
-            raise _fail(
+            raise fail(
                 f"the store for {target.owner} holds {', '.join(dropped)} in the"
                 " window, outside the repository selection, and site cannot"
                 " leave it out: build without the selection, or `collect` the"
@@ -112,5 +118,33 @@ def site(options: SharedOptions) -> None:
         built.append(
             SiteTarget(target, series, contributors, repositories, merged, identities)
         )
-    for written in build_site(built, config, Path(config.output.directory), now=now):
+    return built
+
+
+def write_site(
+    sites: Sequence[SiteTarget], config: Config, *, now: datetime
+) -> list[Path]:
+    """Write the pages of ``sites`` and the landing page; the files written."""
+    from github_statistics.site import build_site
+
+    return build_site(sites, config, Path(config.output.directory), now=now)
+
+
+@shared_options
+def site(options: SharedOptions) -> None:
+    """Write the HTML pages of every target from the store; needs no token.
+
+    The output directory must hold the charts and data of the same run,
+    from `render` and `export`; site links them and does not check their
+    freshness.
+    """
+    try:
+        resolution = options.resolve()
+    except ConfigError as exc:
+        raise fail(str(exc)) from None
+    config = resolution.config
+    now = datetime.now(UTC)
+    until = options.until or now.date() - timedelta(days=1)
+    built = site_targets(resolution, config.targets, until=until)
+    for written in write_site(built, config, now=now):
         typer.echo(str(written))

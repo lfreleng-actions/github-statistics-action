@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -40,6 +39,7 @@ from github_statistics.config import (
 )
 from github_statistics.store import Store, store_path
 
+from .common import append_summary, fail, write_outputs
 from .options import SharedOptions, shared_options
 
 STRICT_EXIT = 2
@@ -144,8 +144,33 @@ def _markdown(tables: list[_Table]) -> str:
     return "\n".join(lines)
 
 
-def _report(results: Sequence[CollectResult]) -> None:
-    """Print the tables; append them and the outputs to the GitHub files set."""
+def collect_target(
+    resolution: Resolution,
+    target: Target,
+    *,
+    now: datetime,
+    until: date | None,
+    refresh: bool,
+) -> CollectResult:
+    """Collect ``target``; a rejected token or a failed read raises the exit to raise.
+
+    A rejected token exits `AUTH_EXIT`, naming the variable that holds
+    it, never its value; any other client failure exits 1.
+    """
+    try:
+        return asyncio.run(
+            _collect_target(resolution, target, now=now, until=until, refresh=refresh)
+        )
+    except AuthError:
+        raise fail(
+            f"GitHub rejected the token in ${target.token_env} (HTTP 401)", AUTH_EXIT
+        ) from None
+    except (ClientError, httpx.HTTPError) as exc:
+        raise fail(f"cannot collect {target.owner}: {exc}") from None
+
+
+def report(results: Sequence[CollectResult]) -> str:
+    """Print the summary tables of ``results``; the same tables as Markdown."""
     tables = _tables(results)
     console = Console()
     for title, headers, rows in tables:
@@ -153,23 +178,17 @@ def _report(results: Sequence[CollectResult]) -> None:
         for row in rows:
             table.add_row(*row)
         console.print(table)
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as handle:
-            handle.write(_markdown(tables))
-    output = os.environ.get("GITHUB_OUTPUT")
-    if output:
-        complete = all(result.coverage_complete for result in results)
-        with open(output, "a", encoding="utf-8") as handle:
-            handle.write(f"requests_used={sum(r.requests for r in results)}\n")
-            handle.write(f"coverage_complete={str(complete).lower()}\n")
-            handle.write(f"gap_days={sum(r.gap_days for r in results)}\n")
+    return _markdown(tables)
 
 
-def _fail(message: str, code: int = 1) -> typer.Exit:
-    """Report ``message`` on standard error; the exit to raise."""
-    typer.echo(f"error: {message}", err=True)
-    return typer.Exit(code)
+def collect_outputs(results: Sequence[CollectResult]) -> dict[str, str]:
+    """The step outputs ``results`` give: requests, coverage and gap days."""
+    complete = all(result.coverage_complete for result in results)
+    return {
+        "requests_used": str(sum(result.requests for result in results)),
+        "coverage_complete": str(complete).lower(),
+        "gap_days": str(sum(result.gap_days for result in results)),
+    }
 
 
 @shared_options
@@ -186,24 +205,15 @@ def collect_command(
     try:
         resolution = options.resolve()
     except ConfigError as exc:
-        raise _fail(str(exc)) from None
+        raise fail(str(exc)) from None
     now = datetime.now(UTC)
-    results: list[CollectResult] = []
-    for target in resolution.config.targets:
-        try:
-            result = asyncio.run(
-                _collect_target(
-                    resolution, target, now=now, until=options.until, refresh=refresh
-                )
-            )
-        except AuthError:
-            raise _fail(
-                f"GitHub rejected the token in ${target.token_env} (HTTP 401)",
-                AUTH_EXIT,
-            ) from None
-        except (ClientError, httpx.HTTPError) as exc:
-            raise _fail(f"cannot collect {target.owner}: {exc}") from None
-        results.append(result)
-    _report(results)
+    results = [
+        collect_target(
+            resolution, target, now=now, until=options.until, refresh=refresh
+        )
+        for target in resolution.config.targets
+    ]
+    append_summary(report(results))
+    write_outputs(collect_outputs(results))
     if strict and any(result.unreadable for result in results):
-        raise _fail("some repositories were unreadable (--strict)", STRICT_EXIT)
+        raise fail("some repositories were unreadable (--strict)", STRICT_EXIT)

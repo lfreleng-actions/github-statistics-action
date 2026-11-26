@@ -275,7 +275,9 @@ configuration change (a new bot name, a new palette) costs no requests.
 ```text
 src/github_statistics/
   cli/            Typer app: scope, collect, render, site, run, export,
-                  doctor, config, cache
+                  doctor, config, cache; common.py (the store opened
+                  for reading, failures, $GITHUB_OUTPUT and step
+                  summary writers)
   config/         schema.py (jsonschema), models.py (frozen dataclasses),
                   loader.py (file, variable, XDG default)
   client/         transport.py, policy.py, accounting.py, cooldown.py,
@@ -384,6 +386,28 @@ identity value shows redacted, as in `config show`. It exits 4 for an
 invalid configuration and 3 for a rejected token; it reports a spent
 budget, a skipped scope, a missing or unreadable store, an empty scope
 and unclassified bots without failing.
+
+`run` takes the shared options with `--refresh` and `--strict`. For
+each target in turn it removes `<output>/<owner>/img/` and
+`<output>/<owner>/data/`, and nothing else under the output directory,
+leaving no chart or data file of an earlier run for the site, and it
+stops with exit 1 when `<output>/<owner>` is a symbolic link, which
+would carry the deletion and every later write outside the output
+directory; then it collects, renders, exports and reads what the
+target's pages show. It writes the pages and the landing page once,
+after every target.
+A spent budget does not stop it: the charts show the gaps. A rejected
+token or an invalid configuration stops it before it renders
+anything. Its exit codes are those of `collect`: 0 on success, a spent
+budget included; 1 for an invalid configuration or a failed stage; 2
+with `--strict`, once it has written the site, when a repository was
+unreadable; 3 for a rejected token. Under GitHub Actions it writes the
+`site_dir`, `requests_used`, `coverage_complete`, `gap_days` and
+`unclassified_bots` (comma-separated) step outputs once, each in the
+multiline form under a fresh delimiter, refusing any name or value
+that could start another output, and appends its tables
+to the job summary. Every run ends with a warning per unclassified bot
+naming `identities.org_bots` and `identities.external_bots`.
 
 ## 5. Scope resolution
 
@@ -1540,25 +1564,38 @@ pinned older release never receives a flag it does not know:
 
 | Input                                                                  | Purpose                                                                   |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `command`                                                              | `run` (default) or `scope`                                                |
 | `config`                                                               | JSON, raw or base64 (`vars.GHS_CONFIG` or `secrets.GHS_CONFIG`)           |
 | `org`                                                                  | Single owner, shorthand for a one-target config                           |
 | `repositories`                                                         | Include list (names or globs); the `list-splitter` `csv` output fits here |
 | `exclude`                                                              | Exclude list; refused together with `repositories`                        |
-| `repo`                                                                 | `owner/name` for repository scope (defaults to the current repository)    |
-| `token`, `token_env`                                                   | Token and the name of the variable that carries it, checked as in GSR     |
+| `repo`                                                                 | `owner/name` for repository scope                                         |
+| `token`                                                                | Token to read GitHub with (default: the job's `github.token`)             |
 | `days`, `until`                                                        | Window                                                                    |
 | `org_bots`, `external_bots`, `members`, `member_orgs`, `ignore_logins` | Identity lists (§7.2); replace the configured list when set               |
 | `output_dir`                                                           | Site root (default `site`)                                                |
 | `cache_dir`                                                            | Store root (default `~/.cache/github-statistics`)                         |
 | `budget`                                                               | REST request budget for this run                                          |
-| `refresh`                                                              | Ignore watermarks                                                         |
+| `refresh`                                                              | Ignore watermarks (`run`)                                                 |
+| `strict`                                                               | Exit 2 when a repository was unreadable (`run`)                           |
 | `tool_version`                                                         | Override the runtime pin                                                  |
 | `use_local_source`                                                     | Run the checked-out source (pull requests do this automatically)          |
 
 <!-- markdownlint-enable MD013 -->
 
 Outputs: `site_dir`, `coverage_complete` (true when every day of every
-metric is complete), `gap_days`, `requests_used`, `unclassified_bots`.
+metric is complete), `gap_days`, `requests_used`, `unclassified_bots`;
+with `command: scope`, `repositories` (comma-separated) and
+`repository_count` instead.
+
+Every input reaches the action's single `bash` step through `env:`,
+never as script text. The action carries the token as `GITHUB_TOKEN`,
+so a configuration used with the action leaves `token_env` at its
+default. `refresh` and `strict` reach `run` alone; with
+`command: scope` the action fails when either is `true`.
+Pull requests and `use_local_source` run the action's own source;
+otherwise `tool_version`, then the runtime pin, names the release
+`uvx` runs.
 
 The runtime pin lives in `.github/runtime-pin/requirements.txt` and
 Dependabot's `pip` ecosystem (daily check, seven-day cooldown) proposes
@@ -1716,8 +1753,8 @@ so.
   the test workflow and audit mode on the scheduled workflow, as the
   org's existing jobs do.
 - The token reaches the tool through an environment variable alone; the
-  action checks the variable name against a reserved list (GSR's check)
-  and never passes the token on a command line.
+  action carries it as `GITHUB_TOKEN` and never passes it on a command
+  line.
 - Private repositories and private memberships are out of scope, with
   no setting to bring them in (§5, §7.1). The App token names the
   resolved public repositories and carries no organisation permission
