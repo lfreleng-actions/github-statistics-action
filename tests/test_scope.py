@@ -417,6 +417,255 @@ def test_apply_leaves_an_undetermined_repository_untouched() -> None:
         assert store.in_scope(TODAY) == ["acme/a", "acme/b"]
 
 
+YESTERDAY = date(2026, 5, 31)
+ITEM_METRICS = ("pull_requests", "issues")
+WORKFLOW_METRICS = (*ITEM_METRICS, "workflows")
+
+
+def _cover(store: Any, repo: str, metrics: tuple[str, ...] = ITEM_METRICS) -> None:
+    """Cover ``metrics`` of ``repo`` over the whole window."""
+    for metric in metrics:
+        store.add_coverage(repo, metric, WINDOW, YESTERDAY)
+
+
+def _run(repo: str, day: date, jobs: int | None) -> Any:
+    from datetime import UTC, datetime, time
+
+    from github_statistics.store import Run
+
+    created = datetime.combine(day, time(12), tzinfo=UTC)
+    return Run(
+        1,
+        "R_1",
+        repo,
+        "ci.yaml",
+        "push",
+        "completed",
+        "success",
+        created,
+        "alice",
+        "User",
+        1,
+        jobs,
+    )
+
+
+def _sync_state(repo: str) -> Any:
+    from github_statistics.store import SyncState
+
+    return SyncState(repo=repo, metric="items")
+
+
+def test_apply_keeps_a_repository_that_left_complete() -> None:
+    from github_statistics.store import Store
+
+    with Store(Path(":memory:")) as store:
+        store.enter_scope("acme/a", WINDOW)
+        _cover(store, "acme/a")
+        changes = _api().apply_scope(
+            store,
+            _scope([], {"a": "archived"}),
+            today=TODAY,
+            window_start=WINDOW,
+            metrics=ITEM_METRICS,
+        )
+
+        assert changes.left == ("acme/a",)
+        assert changes.purged == ()
+        assert store.in_scope(YESTERDAY) == ["acme/a"]
+        assert store.in_scope(TODAY) == []
+        assert store.coverage("acme/a", "issues")
+
+
+def test_apply_purges_a_repository_that_left_incomplete(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from github_statistics.collect.run import window_coverage
+    from github_statistics.store import Store
+
+    with Store(Path(":memory:")) as store:
+        for repo in ("acme/a", "acme/b"):
+            store.enter_scope(repo, WINDOW)
+        _cover(store, "acme/b")
+        store.add_coverage("acme/a", "issues", WINDOW, date(2026, 1, 1))
+        with caplog.at_level("INFO", logger="github_statistics.scope.apply"):
+            changes = _api().apply_scope(
+                store,
+                _scope(["b@2019-01-01T00:00:00Z"], {"a": "archived"}),
+                today=TODAY,
+                window_start=WINDOW,
+                metrics=ITEM_METRICS,
+            )
+        _, gaps = window_coverage(store, "acme", list(ITEM_METRICS), WINDOW, YESTERDAY)
+
+        assert changes.purged == ("acme/a",)
+        assert changes.left == ()
+        assert changes.reasons == {"acme/a": "left incomplete"}
+        assert store.stored_repositories() == ["acme/b"]
+        assert gaps == 0
+        assert "purged acme/a: left incomplete" in caplog.text
+
+
+def test_apply_purges_a_repository_that_left_incomplete_on_an_earlier_run() -> None:
+    from github_statistics.store import Store
+
+    with Store(Path(":memory:")) as store:
+        store.enter_scope("acme/A", WINDOW)
+        store.leave_scope("acme/A", date(2026, 1, 1))
+        store.set_sync_state(_sync_state("acme/a"))
+        store.enter_scope("acme/b", WINDOW)
+        _cover(store, "acme/b")
+        store.add_coverage("acme/A", "issues", WINDOW, date(2025, 12, 1))
+        changes = _api().apply_scope(
+            store,
+            _scope(["b@2019-01-01T00:00:00Z"]),
+            today=TODAY,
+            window_start=WINDOW,
+            metrics=ITEM_METRICS,
+        )
+
+        assert changes.purged == ("acme/A",)
+        assert store.stored_repositories() == ["acme/b"]
+
+
+def test_apply_keeps_a_departed_repository_uncovered_only_before_the_horizon() -> None:
+    from github_statistics.store import Store
+
+    horizon = date(2025, 7, 1)
+    with Store(Path(":memory:")) as store:
+        for repo in ("acme/a", "acme/b"):
+            store.enter_scope(repo, WINDOW)
+            _cover(store, repo)
+        store.add_coverage("acme/a", "runs", horizon, YESTERDAY)
+        store.add_coverage("acme/b", "runs", WINDOW, YESTERDAY)
+        store.upsert_runs([_run("acme/b", horizon, 3)])
+        changes = _api().apply_scope(
+            store,
+            _scope(["b@2019-01-01T00:00:00Z"], {"a": "archived"}),
+            today=TODAY,
+            window_start=WINDOW,
+            metrics=WORKFLOW_METRICS,
+        )
+
+        assert changes.left == ("acme/a",)
+        assert changes.purged == ()
+        assert store.coverage("acme/a", "runs")
+
+
+@pytest.mark.parametrize(
+    ("charted", "purged"),
+    [(WORKFLOW_METRICS, ("acme/a",)), ((*ITEM_METRICS, "workflow_outcomes"), ())],
+)
+def test_apply_grades_missing_job_counts_only_for_workflows(
+    charted: tuple[str, ...], purged: tuple[str, ...]
+) -> None:
+    from github_statistics.store import Store
+
+    with Store(Path(":memory:")) as store:
+        for repo in ("acme/a", "acme/b"):
+            store.enter_scope(repo, WINDOW)
+            _cover(store, repo, (*ITEM_METRICS, "runs"))
+        store.upsert_runs([_run("acme/a", date(2026, 3, 1), None)])
+        changes = _api().apply_scope(
+            store,
+            _scope(["b@2019-01-01T00:00:00Z"], {"a": "archived"}),
+            today=TODAY,
+            window_start=WINDOW,
+            metrics=charted,
+        )
+
+        assert changes.purged == purged
+
+
+def test_apply_grades_only_through_the_window_end() -> None:
+    from github_statistics.store import Store
+
+    end = date(2026, 2, 28)
+    with Store(Path(":memory:")) as store:
+        store.enter_scope("acme/a", WINDOW)
+        for metric in ITEM_METRICS:
+            store.add_coverage("acme/a", metric, WINDOW, end)
+        changes = _api().apply_scope(
+            store,
+            _scope([], {"a": "archived"}),
+            today=TODAY,
+            window_start=WINDOW,
+            window_end=end,
+            metrics=ITEM_METRICS,
+        )
+
+        assert changes.left == ("acme/a",)
+        assert changes.purged == ()
+
+
+def test_apply_purges_an_unfinished_first_listing_with_no_coverage_held() -> None:
+    from github_statistics.store import Store
+
+    with Store(Path(":memory:")) as store:
+        for repo in ("acme/a", "acme/b"):
+            store.enter_scope(repo, WINDOW)
+        store.set_sync_state(_sync_state("acme/a"))
+        changes = _api().apply_scope(
+            store,
+            _scope(["b@2019-01-01T00:00:00Z"], {"a": "archived"}),
+            today=TODAY,
+            window_start=WINDOW,
+            metrics=ITEM_METRICS,
+        )
+
+        assert changes.purged == ("acme/a",)
+        assert store.stored_repositories() == ["acme/b"]
+
+
+def test_apply_grades_every_departed_repository_before_purging() -> None:
+    from github_statistics.store import Store
+
+    with Store(Path(":memory:")) as store:
+        for repo in ("acme/a", "acme/b"):
+            store.enter_scope(repo, WINDOW)
+        store.add_coverage("acme/a", "issues", WINDOW, date(2026, 1, 1))
+        changes = _api().apply_scope(
+            store,
+            _scope([], {"a": "archived", "b": "archived"}),
+            today=TODAY,
+            window_start=WINDOW,
+            metrics=ITEM_METRICS,
+        )
+
+        assert changes.purged == ("acme/a", "acme/b")
+        assert store.stored_repositories() == []
+
+
+def test_apply_reads_run_history_once_for_every_departed_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from github_statistics.store import Store
+
+    calls: dict[str, int] = {"earliest_run_day": 0, "days_missing_jobs": 0}
+    for name in calls:
+        query = getattr(Store, name)
+
+        def counted(self: Any, *args: Any, _name: str = name, _q: Any = query) -> Any:
+            calls[_name] += 1
+            return _q(self, *args)
+
+        monkeypatch.setattr(Store, name, counted)
+    with Store(Path(":memory:")) as store:
+        for repo in ("acme/a", "acme/b", "acme/c"):
+            store.enter_scope(repo, WINDOW)
+            _cover(store, repo, (*ITEM_METRICS, "runs"))
+        changes = _api().apply_scope(
+            store,
+            _scope([], {"a": "archived", "b": "archived", "c": "archived"}),
+            today=TODAY,
+            window_start=WINDOW,
+            metrics=WORKFLOW_METRICS,
+        )
+
+        assert changes.left == ("acme/a", "acme/b", "acme/c")
+        assert calls == {"earliest_run_day": 2, "days_missing_jobs": 1}
+
+
 runner = CliRunner()
 
 

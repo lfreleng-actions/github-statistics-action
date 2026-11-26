@@ -30,7 +30,12 @@ from typing import Any
 
 from github_statistics.client import Transport
 from github_statistics.config import Config, Identities, Target, resolve_identities
-from github_statistics.scope import ResolvedScope, apply_scope, resolve_scope
+from github_statistics.scope import (
+    LEFT_INCOMPLETE,
+    ResolvedScope,
+    apply_scope,
+    resolve_scope,
+)
 from github_statistics.store import Store
 
 from .common import scope_keys
@@ -333,8 +338,21 @@ async def collect(
     scope = await steps.run(SCOPE, resolve_scope(transport, target, known=known))
     owner = target.owner if scope is None else scope.owner
     if scope is not None:
-        apply_scope(store, scope, today=today, window_start=start)
+        changes = apply_scope(
+            store,
+            scope,
+            today=today,
+            window_start=start,
+            window_end=end,
+            metrics=enabled,
+        )
         dropped = {f"{owner}/{drop.name}": drop.reason for drop in scope.dropped}
+        for key, why in changes.reasons.items():
+            if why == LEFT_INCOMPLETE:
+                drop = dropped.get(key)
+                dropped[key] = (
+                    f"purged: {why}" if drop is None else f"{drop}, purged: {why}"
+                )
         for name in scope.unresolved:
             steps.unreadable[f"{owner}/{name}"] = "scope: read failed"
         keys = scope_keys(store, scope, now)
