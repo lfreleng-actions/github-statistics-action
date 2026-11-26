@@ -1221,12 +1221,26 @@ is `failure`, `startup_failure` or `timed_out`; other conclusions count
 in neither. The store holds an item's latest state, so a reopened item
 counts as closed again when, and on the day, it closes again.
 
-**Scheduled runs are the organisation's automation, not a person's
-work.** GitHub reports a scheduled run's triggering actor as whoever
-last changed the schedule (measured: a daily job attributed to a
-maintainer). A run whose `event` is `schedule` so counts as `org_bot`
-whatever its actor, `ignore_logins` included, and the tool credits it
-to no login: it never makes its actor an unclassified bot.
+**Scheduled and dynamic runs are automation, not a person's work.**
+GitHub reports a scheduled run's triggering actor as whoever last
+changed the schedule (measured: a daily job attributed to a
+maintainer). It runs its own automation (Copilot code review,
+Dependabot update jobs, default-setup CodeQL, Pages builds) under the
+event `dynamic`, and reports as its triggering actor the person whose
+action set it off: the author of the reviewed pull request, or whoever
+pushed the commit that rebuilt Pages. A run's `event` decides its
+class, whatever its actor, `ignore_logins` included:
+
+| `event`    | Class          | Login | In a person's `runs_triggered` |
+| ---------- | -------------- | ----- | ------------------------------ |
+| `schedule` | `org_bot`      | none  | no                             |
+| `dynamic`  | `external_bot` | none  | no                             |
+
+A scheduled run is the organisation's automation, a dynamic run
+GitHub's. Both count in `all`, and the tool credits neither to a
+login: neither makes its actor an unclassified bot. No other event
+counts as automation: a `workflow_run`, a `repository_dispatch` or a
+bot's `push` keeps its triggering actor and that actor's class.
 
 An event counts when its repository was in scope that day (the
 `scope` table, §6.1), and never otherwise, nor for an ignored login. The store groups
@@ -1268,7 +1282,7 @@ row per actor over the window, bots included, credited to authors:
 | `prs_opened`, `prs_merged`, `prs_closed_unmerged`           | Pull requests authored, by `created_at`, `merged_at`, and `closed_at` with no merge                       |
 | `issues_opened`, `issues_closed`                            | Issues authored, by `created_at` and `closed_at`                                                          |
 | `reviews`, `prs_reviewed`, `approvals`, `changes_requested` | Reviews submitted; distinct pull requests reviewed; reviews in state `APPROVED`; in `CHANGES_REQUESTED`   |
-| `runs_triggered`                                            | Workflow runs triggered, scheduled runs left out                                                          |
+| `runs_triggered`                                            | Workflow runs triggered, scheduled and dynamic runs left out                                              |
 | `total`                                                     | The sum of every count column above                                                                       |
 
 <!-- markdownlint-enable MD013 -->
@@ -1279,9 +1293,9 @@ pull request counts as a review, and a dismissed review counts in
 a bot login, `name` and `name[bot]`, share one row, and a pull
 request either form reviewed counts once in `prs_reviewed`; where they
 classify apart, the bot class wins. No login gets credit for a
-scheduled run (§7.3). The table leaves out ignored logins, actors
-GitHub reports without a login, and events from repositories out of
-scope on the day. Rows sort by `total` descending, then login.
+scheduled or dynamic run (§7.3). The table leaves out ignored logins,
+actors GitHub reports without a login, and events from repositories
+out of scope on the day. Rows sort by `total` descending, then login.
 
 `merged_by` and `closed_by` in `contributors.columns`, off by default,
 add the columns `merged_as_merger` (pull requests merged in the window

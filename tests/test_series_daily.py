@@ -214,6 +214,23 @@ def test_scheduled_run_is_an_org_bot_whatever_its_actor() -> None:
     assert series.values("workflow_outcomes", "succeeded", "org_bot")[1] == 2
 
 
+def test_dynamic_run_is_an_external_bot_whatever_its_actor() -> None:
+    with _store() as store:
+        store.upsert_runs(
+            [
+                _run(1, event="dynamic"),
+                _run(2, event="dynamic", actor="ghost"),
+                _run(3, event="schedule"),
+            ]
+        )
+        series = _build(store, _config(ignore_logins=("alice",)))
+    assert series.values("workflows", "runs", "external_bot")[1] == 2
+    assert series.values("workflows", "runs", "org_bot")[1] == 1
+    assert series.values("workflows", "runs", "member")[1] == 0
+    assert series.values("workflows", "runs", "all")[1] == 3
+    assert series.values("workflow_outcomes", "succeeded", "external_bot")[1] == 2
+
+
 def test_out_of_scope_days_are_not_counted() -> None:
     with _store() as store:
         store.enter_scope("acme/b", _day(4))

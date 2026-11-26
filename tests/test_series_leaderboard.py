@@ -182,8 +182,20 @@ def test_run_repository_counts_credit_a_scheduled_run_to_no_login() -> None:
         rows = store.run_repository_counts(_day(1), _day(10))
         actors = store.run_actor_counts(_day(1), _day(10))
     assert rows == [
-        ("acme/a", None, None, True, 1, 3),
-        ("acme/a", "alice", "User", False, 1, 3),
+        ("acme/a", None, None, "schedule", 1, 3),
+        ("acme/a", "alice", "User", None, 1, 3),
+    ]
+    assert actors == [("alice", "User", 1)]
+
+
+def test_run_repository_counts_credit_a_dynamic_run_to_no_login() -> None:
+    with _store() as store:
+        store.upsert_runs([_run(1), _run(2, event="dynamic")])
+        rows = store.run_repository_counts(_day(1), _day(10))
+        actors = store.run_actor_counts(_day(1), _day(10))
+    assert rows == [
+        ("acme/a", None, None, "dynamic", 1, 3),
+        ("acme/a", "alice", "User", None, 1, 3),
     ]
     assert actors == [("alice", "User", 1)]
 
@@ -258,6 +270,14 @@ def test_review_columns_count_a_self_review_and_a_dismissed_review() -> None:
 def test_scheduled_runs_are_credited_to_no_login() -> None:
     with _store() as store:
         store.upsert_runs([_run(1), _run(2, event="schedule"), _run(3, actor="bob")])
+        board = _board(store)
+    assert board["alice"].counts["runs_triggered"] == 1
+    assert board["bob"].counts["runs_triggered"] == 1
+
+
+def test_dynamic_runs_are_credited_to_no_login() -> None:
+    with _store() as store:
+        store.upsert_runs([_run(1), _run(2, event="dynamic"), _run(3, actor="bob")])
         board = _board(store)
     assert board["alice"].counts["runs_triggered"] == 1
     assert board["bob"].counts["runs_triggered"] == 1
@@ -403,6 +423,14 @@ def test_repository_table_counts_per_repository() -> None:
         "jobs": 6,
     }
     assert table["acme/b"].counts["prs_opened"] == 1
+
+
+def test_repository_table_counts_a_dynamic_run_whatever_its_actor() -> None:
+    with _store() as store:
+        store.upsert_runs([_run(1, event="dynamic", actor="ignored")])
+        table = _table(store, _config(ignore_logins=("ignored",)))
+    assert table["acme/a"].counts["runs"] == 1
+    assert table["acme/a"].counts["jobs"] == 3
 
 
 def test_repository_table_reports_the_share_of_days_covered() -> None:

@@ -26,6 +26,11 @@ _ITEM_ACTORS = {
     "closed_by": "closed_by_type",
 }
 SCHEDULE_EVENT = "schedule"
+DYNAMIC_EVENT = "dynamic"
+# Run events that are automation rather than a person's work (design §7.3):
+# such a run is grouped with no actor and credited to no login.
+AUTOMATION_EVENTS = (SCHEDULE_EVENT, DYNAMIC_EVENT)
+_AUTOMATION = f"event IN ({marks(len(AUTOMATION_EVENTS))})"
 
 # One actor's count: ``(login, type, count)``.
 ActorCount = tuple[str | None, str | None, int]
@@ -71,35 +76,35 @@ class AggregateStore(ActivityStore):
     def run_day_counts(self, from_day: date, to_day: date) -> list[RunDayCount]:
         """Runs and summed jobs per creation day, actor and conclusion, in scope.
 
-        A scheduled run is grouped with no actor, since GitHub names
-        whoever last edited the schedule. A run without a job count adds
-        nothing to ``jobs``.
+        A run of an automation event is grouped with no actor and its
+        event as ``automation``: GitHub names whoever last edited a
+        schedule, or whose action set off its own automation. A run
+        without a job count adds nothing to ``jobs``.
         """
         low, high = codec.day_bounds(from_day, to_day)
-        scheduled = "event = ?"
         rows = self._connection.execute(
             "SELECT substr(created_at, 1, 10) AS day,"
-            f" CASE WHEN {scheduled} THEN NULL ELSE actor END AS login,"
-            f" CASE WHEN {scheduled} THEN NULL ELSE actor_type END AS login_type,"
-            f" {scheduled} AS is_scheduled, conclusion,"
+            f" CASE WHEN {_AUTOMATION} THEN NULL ELSE actor END AS login,"
+            f" CASE WHEN {_AUTOMATION} THEN NULL ELSE actor_type END AS login_type,"
+            f" CASE WHEN {_AUTOMATION} THEN event END AS automation, conclusion,"
             " COUNT(*), COALESCE(SUM(jobs), 0)"
             " FROM runs WHERE created_at >= ? AND created_at < ?"
             f" AND {_in_scope('runs', 'created_at')}"
-            " GROUP BY day, login, login_type, is_scheduled, conclusion"
-            " ORDER BY day, login, login_type, is_scheduled, conclusion",
-            (SCHEDULE_EVENT, SCHEDULE_EVENT, SCHEDULE_EVENT, low, high),
+            " GROUP BY day, login, login_type, automation, conclusion"
+            " ORDER BY day, login, login_type, automation, conclusion",
+            (*(AUTOMATION_EVENTS * 3), low, high),
         )
         return [
             RunDayCount(
                 codec.parse_day(day),
                 login,
                 account_type,
-                bool(is_scheduled),
+                automation,
                 conclusion,
                 runs,
                 jobs,
             )
-            for day, login, account_type, is_scheduled, conclusion, runs, jobs in rows
+            for day, login, account_type, automation, conclusion, runs, jobs in rows
         ]
 
     def days_missing_jobs(self, from_day: date, to_day: date) -> list[tuple[str, date]]:
@@ -116,16 +121,16 @@ class AggregateStore(ActivityStore):
     def actors(self) -> list[tuple[str, str | None]]:
         """Every distinct ``(login, type)`` the store credits anything to, sorted.
 
-        Authors, mergers, closers, reviewers and the actors of runs that
-        were not scheduled; logins GitHub reported as missing are left out.
+        Authors, mergers, closers, reviewers and the actors of runs of
+        no automation event; logins GitHub reported as missing are left out.
         """
         rows = self._connection.execute(
             "SELECT author, author_type FROM items"
             " UNION SELECT merged_by, merged_by_type FROM items"
             " UNION SELECT closed_by, closed_by_type FROM items"
             " UNION SELECT reviewer, reviewer_type FROM reviews"
-            " UNION SELECT actor, actor_type FROM runs WHERE event != ?",
-            (SCHEDULE_EVENT,),
+            f" UNION SELECT actor, actor_type FROM runs WHERE NOT {_AUTOMATION}",
+            AUTOMATION_EVENTS,
         )
         pairs = {(login, kind) for login, kind in rows if login is not None}
         return sorted(pairs, key=lambda pair: (pair[0], pair[1] or ""))
@@ -215,14 +220,14 @@ class AggregateStore(ActivityStore):
         ]
 
     def run_actor_counts(self, from_day: date, to_day: date) -> list[ActorCount]:
-        """Runs per triggering actor in the days, in scope, scheduled runs left out."""
+        """Runs per triggering actor in the days, in scope, automation left out."""
         low, high = codec.day_bounds(from_day, to_day)
         rows = self._connection.execute(
             "SELECT actor, actor_type, COUNT(*) FROM runs"
-            " WHERE created_at >= ? AND created_at < ? AND event != ?"
+            f" WHERE created_at >= ? AND created_at < ? AND NOT {_AUTOMATION}"
             f" AND {_in_scope('runs', 'created_at')}"
             " GROUP BY actor, actor_type ORDER BY actor, actor_type",
-            (low, high, SCHEDULE_EVENT),
+            (low, high, *AUTOMATION_EVENTS),
         )
         return [(login, account_type, count) for login, account_type, count in rows]
 
@@ -253,28 +258,28 @@ class AggregateStore(ActivityStore):
 
     def run_repository_counts(
         self, from_day: date, to_day: date
-    ) -> list[tuple[str, str | None, str | None, bool, int, int]]:
+    ) -> list[tuple[str, str | None, str | None, str | None, int, int]]:
         """Runs and summed jobs per repository and actor, in scope.
 
-        Rows are ``(repo, login, type, scheduled, runs, jobs)``; a
-        scheduled run carries no login, as in `run_day_counts`.
+        Rows are ``(repo, login, type, automation, runs, jobs)``; a run
+        of an automation event carries no login, as in `run_day_counts`.
         """
         low, high = codec.day_bounds(from_day, to_day)
-        scheduled = "event = ?"
         rows = self._connection.execute(
             "SELECT repo,"
-            f" CASE WHEN {scheduled} THEN NULL ELSE actor END AS login,"
-            f" CASE WHEN {scheduled} THEN NULL ELSE actor_type END AS login_type,"
-            f" {scheduled} AS is_scheduled, COUNT(*), COALESCE(SUM(jobs), 0)"
+            f" CASE WHEN {_AUTOMATION} THEN NULL ELSE actor END AS login,"
+            f" CASE WHEN {_AUTOMATION} THEN NULL ELSE actor_type END AS login_type,"
+            f" CASE WHEN {_AUTOMATION} THEN event END AS automation,"
+            " COUNT(*), COALESCE(SUM(jobs), 0)"
             " FROM runs WHERE created_at >= ? AND created_at < ?"
             f" AND {_in_scope('runs', 'created_at')}"
-            " GROUP BY repo, login, login_type, is_scheduled"
-            " ORDER BY repo, login, login_type, is_scheduled",
-            (SCHEDULE_EVENT, SCHEDULE_EVENT, SCHEDULE_EVENT, low, high),
+            " GROUP BY repo, login, login_type, automation"
+            " ORDER BY repo, login, login_type, automation",
+            (*(AUTOMATION_EVENTS * 3), low, high),
         )
         return [
-            (repo, login, account_type, bool(is_scheduled), runs, jobs)
-            for repo, login, account_type, is_scheduled, runs, jobs in rows
+            (repo, login, account_type, automation, runs, jobs)
+            for repo, login, account_type, automation, runs, jobs in rows
         ]
 
     def member_logins(self, orgs: Iterable[str]) -> list[str]:

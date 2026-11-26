@@ -123,14 +123,16 @@ class ActorDayCount:
 class RunDayCount:
     """Runs and their jobs on one day, for one actor, event kind and conclusion.
 
-    A scheduled run carries no ``login`` or ``account_type``: it is
+    ``automation`` is the event of a run that is automation rather than
+    a person's work (``"schedule"`` or ``"dynamic"``) and ``None`` for any
+    other run. Such a run carries no ``login`` or ``account_type``: it is
     credited to no one (design §7.3).
     """
 
     day: date
     login: str | None
     account_type: str | None
-    scheduled: bool
+    automation: str | None
     conclusion: str | None
     runs: int
     jobs: int
