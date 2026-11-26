@@ -4,10 +4,11 @@
 
 `collect` runs the collectors in a fixed order, sharing the
 transport's one budget: scope, public members, the incremental reads,
-enrichment, backfill, then the re-run sweep. The incremental reads and
-enrichment always come before backfill, so yesterday is complete while
-history still fills in. Each step's listing sync ends before the next
-step starts, so enrichment never runs alongside a listing (design §6.3).
+enrichment, backfill, enrichment of what the backfill stored, then the
+re-run sweep. The incremental reads and the first enrichment always
+come before backfill, so yesterday is complete while history still
+fills in. Each step's listing sync ends before the next step starts,
+so enrichment never runs alongside a listing (design §6.3).
 """
 
 from __future__ import annotations
@@ -149,7 +150,7 @@ class _Plan:
 
 
 async def _sync(steps: Steps, transport: Transport, store: Store, plan: _Plan) -> None:
-    """Steps 3 to 6 of `collect` over ``plan``'s repositories."""
+    """Steps 3 to 7 of `collect` over ``plan``'s repositories."""
     window, now = {"window_start": plan.window_start}, plan.now
 
     def fresh(key: str) -> bool:
@@ -195,58 +196,78 @@ async def _sync(steps: Steps, transport: Transport, store: Store, plan: _Plan) -
         steps.phases(INCREMENTAL, syncs, finished)
         current = [s for s, done in zip(syncs, finished, strict=True) if done]
 
-    await _enrich(steps, transport, store, plan)
+    await _enrich(
+        steps,
+        transport,
+        store,
+        plan.keys if plan.items else [],
+        plan.keys if plan.jobs else [],
+    )
 
     if plan.items and first:
         await items(BACKFILL, first)
+    stored: list[str] = []
     if current:
+        before = {sync.key: sync.result().runs for sync in current}
         backfilled = await each(
             steps, BACKFILL, (guarded(sync, sync.backfill) for sync in current)
         )
         steps.phases(BACKFILL, current, backfilled)
+        stored = [s.key for s in current if s.result().runs > before[s.key]]
     for sync in syncs:
         result = sync.result()
         steps.runs(sync.key, result.unreadable, result.stalled)
+
+    await _enrich(
+        steps,
+        transport,
+        store,
+        first if plan.items else [],
+        stored if plan.jobs else [],
+    )
 
     if current:
         await _sweep(steps, transport, store, [sync.key for sync in current], now)
 
 
 async def _enrich(
-    steps: Steps, transport: Transport, store: Store, plan: _Plan
+    steps: Steps,
+    transport: Transport,
+    store: Store,
+    items: list[str],
+    runs: list[str],
 ) -> None:
-    """Step 4: enrich items, then count jobs; report the repositories they failed.
+    """Steps 4 and 6: enrich the items of ``items``, then count the jobs of ``runs``.
 
-    An id that failed alone, unlike one the budget left, makes the
-    repository holding it unreadable.
+    Either list may be empty, and skips its half. Reports the
+    repositories they failed: an id that failed alone, unlike one the
+    budget left, makes the repository holding it unreadable.
     """
-    if plan.items:
-        enriched = await steps.run(
-            ENRICHMENT, enrich_items(transport, store, plan.keys)
-        )
+    if items:
+        enriched = await steps.run(ENRICHMENT, enrich_items(transport, store, items))
         if enriched is not None and enriched.failed:
             ids = set(enriched.failed)
             steps.failed(
                 "item enrichment",
                 (
                     item.repo
-                    for key in plan.keys
+                    for key in items
                     for item in store.items_needing_enrichment(key, PER_REPOSITORY)
                     if item.node_id in ids
                 ),
             )
-    if plan.jobs:
-        counted = await steps.run(ENRICHMENT, enrich_jobs(transport, store, plan.keys))
+    if runs:
+        counted = await steps.run(ENRICHMENT, enrich_jobs(transport, store, runs))
         if counted is not None and counted.failed:
             ids = set(counted.failed)
-            runs = store.runs_needing_jobs(ALL_RUNS)
-            steps.failed("job counts", (r.repo for r in runs if r.node_id in ids))
+            needing = store.runs_needing_jobs(ALL_RUNS)
+            steps.failed("job counts", (r.repo for r in needing if r.node_id in ids))
 
 
 async def _sweep(
     steps: Steps, transport: Transport, store: Store, keys: list[str], now: datetime
 ) -> None:
-    """Step 6: the re-run sweep of ``keys``, where due."""
+    """Step 7: the re-run sweep of ``keys``, where due."""
     sweeps = await each(
         steps,
         SWEEP,
@@ -283,7 +304,9 @@ async def collect(
     of the reads. Steps: resolve the scope and apply it to the store;
     read public members; the incremental reads of items, from
     repositories with a watermark, then of runs; enrich items, then
-    count jobs; backfill, first item syncs then runs; the re-run sweep,
+    count jobs; backfill, first item syncs then runs; enrich again the
+    items of those first syncs and count the jobs of the runs the
+    backfill stored, whatever REST budget it left; the re-run sweep,
     where due. A disabled metric's collectors do not run. An empty scope
     makes no call after its resolution, and a scope the budget stops
     applies nothing. A repository whose read outlasts its retries is

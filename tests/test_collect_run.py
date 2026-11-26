@@ -173,7 +173,6 @@ def _watermark(store: Any, key: str) -> None:
     store.set_sync_state(SyncState(key, "items", watermark=NOW, oldest=NOW))
 
 
-@pytest.mark.xfail(strict=True, reason="no second enrichment pass yet")
 async def test_runs_the_steps_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """Scope, members, incremental, enrichment, backfill, enrichment, sweep."""
     store = _store()
@@ -237,7 +236,6 @@ async def test_a_small_budget_still_runs_incremental_and_enrichment(
     assert result.exhausted == "incremental"
 
 
-@pytest.mark.xfail(strict=True, reason="no second enrichment pass yet")
 async def test_a_first_sync_enriches_its_items_in_the_same_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -268,7 +266,6 @@ async def test_a_warm_run_enriches_once(monkeypatch: pytest.MonkeyPatch) -> None
     assert names.count("enrich_jobs") == 1
 
 
-@pytest.mark.xfail(strict=True, reason="no second enrichment pass yet")
 async def test_a_budget_spent_in_backfill_still_enriches_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
