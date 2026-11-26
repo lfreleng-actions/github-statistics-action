@@ -458,7 +458,6 @@ async def test_a_rest_client_error_in_the_scope_read_propagates(
         await _collect(store)
 
 
-@pytest.mark.xfail(strict=True)
 async def test_the_summary_names_a_repository_purged_as_left_incomplete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

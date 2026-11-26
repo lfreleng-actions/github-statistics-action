@@ -507,7 +507,17 @@ the date of the run that saw it, so a
 repository that leaves the scope (archived, excluded) drops out of the
 counts from that day without losing its history, and one that returns
 enters again from that day. The run purges a repository dropped as
-`not public` or `not found` instead.
+`not public` or `not found` instead. It also purges, as
+`left incomplete`, every stored repository out of scope whose history
+is incomplete, whether it left on this run or an earlier one: an
+enabled metric misses some day of the requested window on which the
+scope held it, by the rule §7.3 grades by, with days before the runs
+horizon counting for no run metric. The run grades every such
+repository before it purges any, and its summary names each as
+`purged: left incomplete`. No run reads a departed repository again,
+and each day the scope held it would stay partial for good. A
+repository purged this way that returns enters as new, from the window
+start or its creation day.
 
 ## 6. Data model and collection
 
@@ -568,8 +578,9 @@ list of repositories bind at most 500 parameters per statement.
 
 `purge_repository` deletes every row of one repository from every
 table in one transaction: the privacy purge for a repository that
-turns private (§5). `prune` drops history that ended before a given
-day. It keeps an item updated on or after that day, whose reviews
+turns private (§5), and the purge of a repository that left the scope
+with its history incomplete (§5). `prune` drops history that ended
+before a given day. It keeps an item updated on or after that day, whose reviews
 enrichment may still re-read (§6.3), and each repository's latest
 scope interval, so a repository that returns after a prune still
 enters from the run date (§5). A

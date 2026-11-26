@@ -456,7 +456,6 @@ def _sync_state(repo: str) -> Any:
     return SyncState(repo=repo, metric="items")
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_keeps_a_repository_that_left_complete() -> None:
     from github_statistics.store import Store
 
@@ -478,7 +477,6 @@ def test_apply_keeps_a_repository_that_left_complete() -> None:
         assert store.coverage("acme/a", "issues")
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_purges_a_repository_that_left_incomplete(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -508,7 +506,6 @@ def test_apply_purges_a_repository_that_left_incomplete(
         assert "purged acme/a: left incomplete" in caplog.text
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_purges_a_repository_that_left_incomplete_on_an_earlier_run() -> None:
     from github_statistics.store import Store
 
@@ -531,7 +528,6 @@ def test_apply_purges_a_repository_that_left_incomplete_on_an_earlier_run() -> N
         assert store.stored_repositories() == ["acme/b"]
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_keeps_a_departed_repository_uncovered_only_before_the_horizon() -> None:
     from github_statistics.store import Store
 
@@ -556,7 +552,6 @@ def test_apply_keeps_a_departed_repository_uncovered_only_before_the_horizon() -
         assert store.coverage("acme/a", "runs")
 
 
-@pytest.mark.xfail(strict=True)
 @pytest.mark.parametrize(
     ("charted", "purged"),
     [(WORKFLOW_METRICS, ("acme/a",)), ((*ITEM_METRICS, "workflow_outcomes"), ())],
@@ -582,7 +577,6 @@ def test_apply_grades_missing_job_counts_only_for_workflows(
         assert changes.purged == purged
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_grades_only_through_the_window_end() -> None:
     from github_statistics.store import Store
 
@@ -604,7 +598,6 @@ def test_apply_grades_only_through_the_window_end() -> None:
         assert changes.purged == ()
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_purges_an_unfinished_first_listing_with_no_coverage_held() -> None:
     from github_statistics.store import Store
 
@@ -624,7 +617,6 @@ def test_apply_purges_an_unfinished_first_listing_with_no_coverage_held() -> Non
         assert store.stored_repositories() == ["acme/b"]
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_grades_every_departed_repository_before_purging() -> None:
     from github_statistics.store import Store
 
@@ -644,7 +636,6 @@ def test_apply_grades_every_departed_repository_before_purging() -> None:
         assert store.stored_repositories() == []
 
 
-@pytest.mark.xfail(strict=True)
 def test_apply_reads_run_history_once_for_every_departed_repository(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

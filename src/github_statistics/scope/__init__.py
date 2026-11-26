@@ -4,10 +4,11 @@
 
 from __future__ import annotations
 
-from .apply import ScopeChanges, apply_scope
+from .apply import LEFT_INCOMPLETE, ScopeChanges, apply_scope
 from .resolver import Dropped, Repository, ResolvedScope, resolve_scope
 
 __all__ = [
+    "LEFT_INCOMPLETE",
     "Dropped",
     "Repository",
     "ResolvedScope",

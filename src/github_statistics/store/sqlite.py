@@ -230,6 +230,17 @@ class Store(AggregateStore):
         )
         return [row[0] for row in rows]
 
+    def scope_intervals(self, repo: str) -> list[tuple[date, date | None]]:
+        """The scope intervals of ``repo`` by start; the end is ``None`` while open."""
+        rows = self._connection.execute(
+            "SELECT from_day, to_day FROM scope WHERE repo = ? ORDER BY from_day",
+            (repo,),
+        )
+        return [
+            (codec.parse_day(a), None if b is None else codec.parse_day(b))
+            for a, b in rows
+        ]
+
     def stored_repositories(self) -> list[str]:
         """Every repository with a row in any per-repository table, sorted."""
         union = " UNION ".join(f"SELECT repo FROM {t}" for t in REPOSITORY_TABLES)
