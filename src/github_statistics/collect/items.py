@@ -57,6 +57,17 @@ class ItemSyncResult:
     unreadable: int | None = None
 
 
+def _by_position(response: httpx.Response) -> bool:
+    """Whether the page's ``next`` link pages by position, not by cursor.
+
+    GitHub's links carry an ``after`` cursor, which keeps the read by key
+    while items move to the end of the listing (design §6.2).
+    """
+    link = response.links.get("next")
+    target = link.get("url") if link else None
+    return bool(target) and "after" not in response.url.join(target).params
+
+
 def _parse(text: str | None) -> datetime | None:
     """A GitHub timestamp as an aware `datetime`, or ``None``."""
     return None if text is None else datetime.fromisoformat(text)
@@ -152,7 +163,8 @@ async def sync_items(
     token GitHub rejected with ``AuthError``; when the budget is spent,
     the transport raises ``BudgetExhaustedError``, or an
     unbudgeted transport returns a rate limit its retries did not clear,
-    the sync stops with ``drained=False``. Any other ``403``, a ``404``,
+    the sync stops with ``drained=False``. A ``next`` link without an
+    ``after`` cursor logs one warning, and the sync carries on. Any other ``403``, a ``404``,
     ``410`` or a ``5xx``
     left after the transport's retries marks the repository unreadable
     with no coverage change. Coverage of both metrics, over the window,
@@ -178,10 +190,17 @@ async def sync_items(
         "since": since.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     stored = pages = 0
-    drained = False
+    drained = warned = False
     try:
-        async for page, _response in get_paged(transport, "/" + path, params):
+        async for page, response in get_paged(transport, "/" + path, params):
             pages += 1
+            if not warned and _by_position(response):
+                warned = True
+                log.warning(
+                    "the host pages the items of %s by position, not by cursor,"
+                    " so items updated during the read may be missed",
+                    key,
+                )
             items = [_item(key, data) for data in page]
             if items:
                 state = dataclasses.replace(state, watermark=items[-1].updated_at)

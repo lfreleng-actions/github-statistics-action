@@ -250,20 +250,22 @@ async def test_get_paged_follows_next_across_three_pages() -> None:
             200,
             json=[{"n": 1}],
             headers={
-                "Link": f'<{API}/repos/acme/a/issues?state=all&page=2>; rel="next"'
+                "Link": f'<{API}/repos/acme/a/issues?state=all&after=c1&page=2>; rel="next"'
             },
         )
         respx.get(
-            f"{API}/repos/acme/a/issues", params__eq={"state": "all", "page": "2"}
+            f"{API}/repos/acme/a/issues",
+            params__eq={"state": "all", "after": "c1", "page": "2"},
         ).respond(
             200,
             json=[{"n": 2}],
             headers={
-                "Link": f'<{API}/repos/acme/a/issues?state=all&page=3>; rel="next"'
+                "Link": f'<{API}/repos/acme/a/issues?state=all&after=c2&page=3>; rel="next"'
             },
         )
         respx.get(
-            f"{API}/repos/acme/a/issues", params__eq={"state": "all", "page": "3"}
+            f"{API}/repos/acme/a/issues",
+            params__eq={"state": "all", "after": "c2", "page": "3"},
         ).respond(200, json=[{"n": 3}])
         async with _transport(sleep) as transport:
             pages = [
