@@ -1,0 +1,362 @@
+---
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Linux Foundation
+
+# Collect, render and publish the statistics site daily (design §9.2)
+name: "GitHub Statistics 📊"
+
+# yamllint disable-line rule:truthy
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      repositories:
+        description: "Repository names or globs to keep (default: all)"
+        type: string
+        default: ""
+      refresh:
+        description: "Ignore watermarks and re-read the window"
+        type: boolean
+        default: false
+      use_local_source:
+        description: "Run the action's own source, not the runtime pin"
+        type: boolean
+        default: false
+
+concurrency:
+  group: "statistics"
+  cancel-in-progress: false
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: "Collect and render"
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+    permissions:
+      actions: read # list and download the store artifact
+      contents: read
+      pages: write # configure-pages
+    steps:
+      # yamllint disable-line rule:line-length
+      - uses: lfreleng-actions/harden-runner-block-action@65ff87957e1cac2de3203a85dbb07c31810321cb  # v0.16.4
+        with:
+          # yamllint disable-line rule:line-length
+          config: 'lfreleng-actions@6d4a65c5601afd6c2fbe52bda4b0024b132f265d'  # v0.19.0
+      - name: 'Harden runner (block)'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c  # v2.23.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            ${{ env.CONNECTION_ALLOW_LIST }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # yamllint disable-line rule:line-length
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+
+      # Public repositories need no more than the job's own token.
+      - name: "Resolve the scope"
+        id: scope
+        uses: $/
+        with:
+          command: scope
+          token: ${{ github.token }}
+          org: ${{ github.repository_owner }}
+          config: ${{ secrets.GHS_CONFIG || vars.GHS_CONFIG }}
+          repositories: ${{ inputs.repositories }}
+          use_local_source: ${{ inputs.use_local_source }}
+
+      # An empty 'repositories' input would grant the App token the whole
+      # installation, private repositories included: the next step runs
+      # only for a count this one has proved to be a positive number.
+      - name: "Check the scope"
+        env:
+          COUNT: ${{ steps.scope.outputs.repository_count }}
+          REPOSITORIES: ${{ steps.scope.outputs.repositories }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$COUNT" =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::repository_count is not a number: '$COUNT'"
+            exit 1
+          elif [ "$COUNT" -gt 500 ]; then
+            echo "::error::$COUNT repositories in scope; an App token names" \
+              "at most 500. Use a fine-grained PAT limited to public" \
+              "repositories instead."
+            exit 1
+          elif [ "$COUNT" -gt 0 ] && [ -z "$REPOSITORIES" ]; then
+            echo "::error::repository_count is $COUNT but names none"
+            exit 1
+          elif [ "$COUNT" -eq 0 ]; then
+            echo "::notice::No public repository in scope; minting no token"
+          fi
+
+      # Read access to the resolved public repositories alone, and no
+      # organisation permission (design §9.4).
+      - name: "Mint the App token"
+        id: app-token
+        if: steps.scope.outputs.repository_count != '0'
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc  # v3.4.0
+        with:
+          client-id: ${{ vars.LF_RELENG_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.LF_RELENG_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.scope.outputs.repositories }}
+          permission-metadata: read
+          permission-issues: read
+          permission-pull-requests: read
+          permission-actions: read
+          permission-checks: read
+
+      # The run takes its store root from here, so a GHS_CONFIG
+      # cache.directory cannot move it away from what is restored and saved.
+      - name: "Check for the store key"
+        id: store-key
+        env:
+          GHS_STORE_KEY: ${{ secrets.GHS_STORE_KEY }}
+        run: |
+          set -euo pipefail
+          echo "cache_dir=$HOME/.cache/github-statistics" >> "$GITHUB_OUTPUT"
+          if [ -n "$GHS_STORE_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GHS_STORE_KEY is not set: the store is neither" \
+              "restored nor saved, and the run backfills from empty"
+          fi
+
+      - name: "Restore the store from the cache"
+        id: cache
+        if: steps.store-key.outputs.enabled == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/ghs-store.tar.enc
+          key: ghs-store-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ghs-store-
+
+      # Any run, a pull request's included, can upload an artifact of
+      # this name: accept one from this workflow's own scheduled or
+      # dispatched runs on the default branch alone (design §9.3).
+      - name: "Restore the store from the newest trusted artifact"
+        if: >-
+          steps.store-key.outputs.enabled == 'true' &&
+          steps.cache.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          # gh api exits non-zero on an API error, so a failed lookup
+          # fails the step rather than passing for "none found". Every
+          # page is read: untrusted uploads may fill the newest ones.
+          api="repos/${GITHUB_REPOSITORY}/actions"
+          branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+          candidates="$(gh api --paginate \
+            "$api/artifacts?name=github-statistics-store&per_page=100" \
+            --jq '.artifacts[] | select(.expired | not)
+              | [.created_at, .id, .workflow_run.id,
+                 .workflow_run.head_branch, .workflow_run.repository_id,
+                 .workflow_run.head_repository_id] | @tsv' | sort -r)"
+          while IFS=$'\t' read -r _ artifact run_id head repo_id head_id; do
+            [[ "$artifact" =~ ^[0-9]+$ && "$run_id" =~ ^[0-9]+$ ]] || continue
+            [ "$head" = "$branch" ] || continue
+            [ "$repo_id" = "$REPOSITORY_ID" ] || continue
+            [ "$head_id" = "$REPOSITORY_ID" ] || continue
+            origin="$(gh api "$api/runs/$run_id" --jq '[.path, .event] | @tsv')"
+            case "$origin" in
+              .github/workflows/statistics.yaml$'\t'schedule) ;;
+              .github/workflows/statistics.yaml$'\t'workflow_dispatch) ;;
+              *) continue ;;
+            esac
+            gh api "$api/artifacts/$artifact/zip" > "$RUNNER_TEMP/store.zip"
+            unzip -o -q "$RUNNER_TEMP/store.zip" ghs-store.tar.enc -d "$HOME"
+            echo "Restored the store from artifact $artifact (run $run_id)"
+            exit 0
+          done <<< "$candidates"
+          echo "::notice::No trusted store artifact; the run backfills"
+
+      # A copy that does not decrypt (a rotated key) is discarded with a
+      # warning: the run backfills rather than fails.
+      - name: "Decrypt the store"
+        if: steps.store-key.outputs.enabled == 'true'
+        env:
+          GHS_STORE_KEY: ${{ secrets.GHS_STORE_KEY }}
+        run: |
+          set -euo pipefail
+          encrypted="$HOME/ghs-store.tar.enc"
+          if [ ! -f "$encrypted" ]; then
+            echo "No stored copy; the run starts from an empty store"
+            exit 0
+          fi
+          staging="$RUNNER_TEMP/ghs-store"
+          mkdir -p "$staging" "$HOME/.cache"
+          if openssl enc -d -aes-256-cbc -pbkdf2 -pass env:GHS_STORE_KEY \
+              -in "$encrypted" | tar -xf - -C "$staging" &&
+            [ -d "$staging/github-statistics" ]; then
+            rm -rf "$HOME/.cache/github-statistics"
+            mv "$staging/github-statistics" "$HOME/.cache/"
+            echo "Decrypted the store ✅"
+          else
+            echo "::warning::The stored copy does not decrypt (a rotated" \
+              "GHS_STORE_KEY?); discarding it, and the run backfills"
+          fi
+          rm -rf "$staging" "$encrypted"
+
+      # A composite action cannot read 'vars', so each identity list
+      # comes from its variable here; an unset one arrives empty.
+      - name: "Collect and render"
+        id: statistics
+        uses: $/
+        with:
+          command: run
+          token: ${{ steps.app-token.outputs.token }}
+          config: ${{ secrets.GHS_CONFIG || vars.GHS_CONFIG }}
+          org: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repositories }}
+          output_dir: site
+          cache_dir: ${{ steps.store-key.outputs.cache_dir }}
+          refresh: ${{ inputs.refresh }}
+          use_local_source: ${{ inputs.use_local_source }}
+          org_bots: ${{ vars.GHS_ORG_BOTS }}
+          external_bots: ${{ vars.GHS_EXTERNAL_BOTS }}
+          members: ${{ vars.GHS_MEMBERS }}
+          member_orgs: ${{ vars.GHS_MEMBER_ORGS }}
+          ignore_logins: ${{ vars.GHS_IGNORE_LOGINS }}
+
+      # The store is written in transactions, so a run that failed
+      # part-way leaves it consistent and its progress worth keeping.
+      - name: "Encrypt the store"
+        id: encrypt
+        if: always() && steps.store-key.outputs.enabled == 'true'
+        env:
+          GHS_STORE_KEY: ${{ secrets.GHS_STORE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ ! -d "$HOME/.cache/github-statistics" ]; then
+            echo "::notice::No store to save"
+            exit 0
+          fi
+          tar -cf - -C "$HOME/.cache" github-statistics |
+            openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:GHS_STORE_KEY \
+              -out "$HOME/ghs-store.tar.enc"
+          echo "saved=true" >> "$GITHUB_OUTPUT"
+      - name: "Save the store to the cache"
+        if: always() && steps.encrypt.outputs.saved == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/ghs-store.tar.enc
+          key: ghs-store-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: "Upload the store artifact"
+        if: success() && steps.encrypt.outputs.saved == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: github-statistics-store
+          path: ~/ghs-store.tar.enc
+          retention-days: 90
+          if-no-files-found: error
+
+      # yamllint disable-line rule:line-length
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: "Deploy to GitHub Pages"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # deploy-pages
+      pages: write # deploy-pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # yamllint disable-line rule:line-length
+      - uses: lfreleng-actions/harden-runner-block-action@65ff87957e1cac2de3203a85dbb07c31810321cb  # v0.16.4
+        with:
+          # yamllint disable-line rule:line-length
+          config: 'lfreleng-actions@6d4a65c5601afd6c2fbe52bda4b0024b132f265d'  # v0.19.0
+      - name: 'Harden runner (block)'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c  # v2.23.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            ${{ env.CONNECTION_ALLOW_LIST }}
+      - name: "Deploy to GitHub Pages"
+        id: deployment
+        # yamllint disable-line rule:line-length
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
+      - name: "Summarise"
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          echo "📊 Published: $PAGE_URL" >> "$GITHUB_STEP_SUMMARY"
+
+  notify-failure:
+    name: "Notify Slack of a failure"
+    needs: [build, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # yamllint disable-line rule:line-length
+      - uses: lfreleng-actions/harden-runner-block-action@65ff87957e1cac2de3203a85dbb07c31810321cb  # v0.16.4
+        with:
+          # yamllint disable-line rule:line-length
+          config: 'lfreleng-actions@6d4a65c5601afd6c2fbe52bda4b0024b132f265d'  # v0.19.0
+      - name: 'Harden runner (block)'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c  # v2.23.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            ${{ env.CONNECTION_ALLOW_LIST }}
+
+      # A fork without Slack warns here rather than fails a second time.
+      - name: "Check the Slack settings"
+        id: slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SLACK_BOT_TOKEN or SLACK_CHANNEL_ID is not set;" \
+              "no Slack notice sent"
+          fi
+      - name: "Notify Slack"
+        if: steps.slack.outputs.configured == 'true'
+        # yamllint disable-line rule:line-length
+        uses: slackapi/slack-github-action@0bc3581177d9a0f8d555e07689384b376528e8fa  # v4.1.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          # yamllint disable rule:line-length
+          payload: |
+            {
+              "channel": "${{ vars.SLACK_CHANNEL_ID }}",
+              "text": "❌ The GitHub statistics workflow failed (build: ${{ needs.build.result }}, deploy: ${{ needs.deploy.result }}). Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/statistics.yaml"
+            }
+          # yamllint enable rule:line-length

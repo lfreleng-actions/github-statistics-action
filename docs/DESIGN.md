@@ -1626,12 +1626,20 @@ cooldown proves too slow.
 `statistics.yaml`, scheduled daily (05:00 UTC, before GSR's 09:00 so
 the two never compete for the same token's budget) plus
 `workflow_dispatch` with `repositories`, `use_local_source` and `refresh`
-inputs. Jobs:
+inputs. One run at a time (`concurrency` group `statistics`, never
+cancelled in progress); top-level `permissions: {}`, each job granting
+its own. Every job starts with harden-runner in block mode on the
+organisation's egress allow-list, read from `lfreleng-actions/.github`
+at a pinned commit named in full, so a fork reads the same list.
+Jobs:
 
-1. **build** (`environment: production`): harden-runner; checkout with
-   `persist-credentials: false`; `configure-pages`; resolve the scope
-   with the job's own `GITHUB_TOKEN` (`github-statistics scope`; public
-   repositories need no more); mint an App
+1. **build** (`environment: production`; `contents: read`,
+   `actions: read` for the store artifact, `pages: write`): checkout
+   with `persist-credentials: false`; `configure-pages`; resolve the
+   scope with the job's own `GITHUB_TOKEN` (the action's
+   `command: scope`; public repositories need no more); a guard step
+   that fails the job unless `repository_count` holds a whole number
+   no greater than 500 and names repositories when non-zero; mint an App
    installation token from the existing org App (`LF_RELENG_BOT_CLIENT_ID`
    / `LF_RELENG_BOT_PRIVATE_KEY`) for those repositories alone, through
    the `repositories` input of `actions/create-github-app-token`, and
@@ -1642,24 +1650,29 @@ inputs. Jobs:
    Such a token cannot read a private repository whatever the tool
    does. An empty `repositories` input would grant the whole
    installation, private repositories included, so when the scope
-   resolves to nothing the job mints no token and collects nothing,
-   and still applies scope removals and purges to the store. An
-   installation token names at most 500 repositories; a larger
-   scope falls back to an owner-wide token, with the tool's own
-   visibility check (§5) as the control. A fine-grained PAT limited to
-   public repositories is the documented
-   alternative for other organisations; restore the store (§9.3); run the
-   action with `config: ${{ secrets.GHS_CONFIG || vars.GHS_CONFIG }}`
-   and each identity input fed from its variable, for example
-   `org_bots: ${{ vars.GHS_ORG_BOTS }}` (§7.2); save the
-   store, `if: always()`; upload the Pages artifact; upload the store
-   artifact on success.
+   resolves to nothing the job mints no token, the run falls back to
+   the job's own token and collects nothing, and still applies scope
+   removals and purges to the store. An
+   installation token names at most 500 repositories, so a larger
+   scope fails the job with a message saying so; such an organisation
+   needs a fine-grained PAT limited to public repositories, the
+   documented alternative for other organisations. Then restore the
+   store (§9.3); run the
+   action with `config: ${{ secrets.GHS_CONFIG || vars.GHS_CONFIG }}`,
+   the dispatch inputs, and each identity input fed from its variable,
+   for example `org_bots: ${{ vars.GHS_ORG_BOTS }}` (§7.2), since a
+   composite action cannot read `vars`; save the
+   store, `if: always()`; upload the store artifact on success; upload
+   the Pages artifact. Shell steps take every value through `env:`,
+   secrets included, and never from a `${{ }}` expression in the script.
 2. **deploy**: `actions/deploy-pages` under the `github-pages`
-   environment.
+   environment, writing the page URL to the job summary.
 3. **notify-failure** (`if: failure()`, `environment: production`): the
-   GSR Slack job verbatim, naming each job's result and linking the run
+   GSR Slack job's shape, naming each job's result and linking the run
    and the workflow page, posting to `vars.SLACK_CHANNEL_ID` with
-   `secrets.SLACK_BOT_TOKEN`. A second, non-failing notice goes out when
+   `secrets.SLACK_BOT_TOKEN`. Without both it warns and skips, so a fork
+   without Slack does not fail twice. The degradation notice of §13's
+   hardening phase is not built yet: a second, non-failing notice when
    `coverage_complete` is false for more than a configured number of
    consecutive days, so a silent degradation (a revoked token producing
    `403`s on one repository) does not go unnoticed for a week.
@@ -1672,8 +1685,13 @@ start, but a budgeted run must have room to spend it.
 Three layers, each rebuildable from the next:
 
 1. **Actions cache** (hot path, GSR precedent). Key
-   `ghs-store-${{ github.run_id }}` with restore prefix `ghs-store-`, so
-   each run restores the newest earlier entry and saves its own. A daily
+   `ghs-store-${{ github.run_id }}-${{ github.run_attempt }}` with
+   restore prefix `ghs-store-`, so each run restores the newest earlier
+   entry and saves its own; a re-run attempt saves under a new key
+   rather than meet the earlier attempt's immutable entry. The workflow
+   passes the action an explicit `cache_dir` under `~/.cache`, so a
+   `cache.directory` in `GHS_CONFIG` cannot move the store away from
+   the copy it restores and saves. A daily
    schedule keeps the entry inside GitHub's seven-day idle eviction.
    `openssl enc -aes-256-cbc -pbkdf2` encrypts the tarball under
    `secrets.GHS_STORE_KEY` when that secret exists, and both steps skip
@@ -1685,11 +1703,15 @@ Three layers, each rebuildable from the next:
    without the key, as the cache does. When the cache
    misses, the restore step lists
    `GET /repos/{repo}/actions/artifacts?name=github-statistics-store`,
-   newest first, and accepts a candidate from a run of this workflow
+   every page, newest first, and accepts a candidate from a run of this workflow
    file, on the default branch of this repository, started by
    `schedule` or `workflow_dispatch`, and from no other run: any
    workflow, a pull request's included, can upload an artifact of that
-   name. It downloads and decrypts the first that passes. This survives
+   name. It downloads the first that passes; a failed listing or
+   download fails the job, so an API error never passes for "none
+   found" and starts an empty store unnoticed. The workflow discards,
+   with a warning, a cache entry or artifact that does not decrypt (a
+   rotated key), and the run backfills. This survives
    a week of broken runs, a cache purge,
    and a runner image change. The public dataset is the site's
    `data/*.json` (§8.6), never the store.
@@ -1766,8 +1788,8 @@ so.
 
 - Every remote `uses:` pinned to a commit SHA; `zizmor` with the
   `auditor` persona at zero findings; `harden-runner` in block mode on
-  the test workflow and audit mode on the scheduled workflow, as the
-  org's existing jobs do.
+  the organisation's egress allow-list, on the test workflow and the
+  scheduled workflow alike.
 - The token reaches the tool through an environment variable alone; the
   action carries it as `GITHUB_TOKEN` and never passes it on a command
   line.

@@ -19,7 +19,11 @@ action wraps it for use in workflows.
 
 ## 🗒️ Published reports
 
-The link to the published site will appear here once the site goes live.
+<https://lfreleng-actions.github.io/github-statistics-action/>
+
+The [daily workflow](.github/workflows/statistics.yaml) rebuilds the
+site at 05:00 UTC; see [Secrets and variables](#secrets-and-variables)
+for its settings.
 
 ## Usage
 
@@ -227,6 +231,53 @@ below it. Precedence, highest first: command line flags and the action
 inputs that become them; `targets[].identities` for that target;
 top-level `identities`; the built-in defaults, which are empty lists
 and `member_orgs` equal to the target owner.
+
+## Secrets and variables
+
+`.github/workflows/statistics.yaml` collects, renders and deploys the
+published site every day, and on `workflow_dispatch` with optional
+`repositories`, `refresh` and `use_local_source` inputs. It reads
+these from the `production` environment, the repository or the
+organisation, and the nearest one of a name wins:
+
+<!-- markdownlint-disable MD013 -->
+
+| Name                        | Kind               | Purpose                                                                         |
+| --------------------------- | ------------------ | ------------------------------------------------------------------------------- |
+| `LF_RELENG_BOT_CLIENT_ID`   | Variable           | Client ID of the organisation App that mints the read token                     |
+| `LF_RELENG_BOT_PRIVATE_KEY` | Secret             | Private key of that App                                                         |
+| `GHS_CONFIG`                | Secret or variable | Configuration JSON, raw or base64; the secret wins when both exist              |
+| `GHS_STORE_KEY`             | Secret             | Passphrase that encrypts the store in the cache and the artifact                |
+| `GHS_ORG_BOTS`              | Variable           | Feeds the `org_bots` input                                                      |
+| `GHS_EXTERNAL_BOTS`         | Variable           | Feeds the `external_bots` input                                                 |
+| `GHS_MEMBERS`               | Variable           | Feeds the `members` input                                                       |
+| `GHS_MEMBER_ORGS`           | Variable           | Feeds the `member_orgs` input                                                   |
+| `GHS_IGNORE_LOGINS`         | Variable           | Feeds the `ignore_logins` input                                                 |
+| `SLACK_BOT_TOKEN`           | Secret             | Bot token that posts the failure notice                                         |
+| `SLACK_CHANNEL_ID`          | Variable           | Channel for the failure notice                                                  |
+
+<!-- markdownlint-enable MD013 -->
+
+Every one is optional except the App pair, which the workflow needs
+whenever the scope holds a repository. The action passes its token to
+the tool as `GITHUB_TOKEN`, so a `GHS_CONFIG` must leave each target's
+`token_env` at its default. The workflow sets the store root itself:
+a `cache.directory` in `GHS_CONFIG` has no effect there. Without
+`GHS_STORE_KEY` the workflow neither restores nor saves the store and
+says so in a notice; each run then backfills from empty. Without both
+Slack settings the workflow sends no failure notice and warns instead.
+
+The App token names the public repositories the scope resolves to,
+with read access alone and no organisation permission, so it cannot
+read a private repository. An App token names at most 500
+repositories: an organisation with more fails the run, and needs a
+fine-grained personal access token limited to public repositories
+instead. The workflow restores the store from the Actions cache, or
+on a miss from the newest `github-statistics-store` artifact uploaded
+by its own scheduled or dispatched runs on the default branch.
+
+Before the first run, set the repository's Pages source to GitHub
+Actions.
 
 ## Running locally
 
