@@ -186,12 +186,46 @@ async def test_interrupted_sync_resumes_without_losing_the_boundary_item() -> No
         assert store.counts()["items"] == 2
         assert _coverage(store, "issues") == []
         assert _coverage(store, "pull_requests") == []
+        assert store.sync_state("acme/a", "items").unfinished is True
 
         resumed = await _sync(store)
 
         assert resumed.drained is True
+        assert store.sync_state("acme/a", "items").unfinished is False
         assert store.counts()["items"] == 3
         assert _coverage(store, "issues") == [(WINDOW, date(2026, 3, 9))]
+
+
+@respx.mock
+async def test_a_sync_stopped_short_is_marked_until_one_drains() -> None:
+    """Coverage a drained sync earned stays; the mark says the rows mix reads."""
+    from github_statistics.client import Budget
+
+    closed, reopened = _at(5), _at(10, 1)
+    both = [_listed(1, reopened), _listed(2, reopened)]
+    _serve(
+        {
+            FIRST_SINCE: [[_listed(n, closed, closed=closed) for n in (1, 2)]],
+            "2026-03-05T11:59:59Z": [[both[0]], [both[1]]],
+            "2026-03-10T00:59:59Z": [both],
+        }
+    )
+    with _store() as store:
+        store.enter_scope("acme/a", WINDOW)
+        assert (await _sync(store)).drained is True
+
+        cut = await _sync(store, budget=Budget(rest=1))
+
+        assert (cut.drained, cut.items) == (False, 1)
+        assert store.covered("acme/a", "issues", date(2026, 3, 5))
+        rows = store.items_between(WINDOW, date(2026, 3, 9))
+        assert [item.closed_at for item in rows] == [None, closed]
+        assert store.sync_state("acme/a", "items").unfinished is True
+        assert store.unfinished("items", WINDOW, date(2026, 3, 9)) == ["acme/a"]
+
+        assert (await _sync(store)).drained is True
+        assert store.sync_state("acme/a", "items").unfinished is False
+        assert store.unfinished("items", WINDOW, date(2026, 3, 9)) == []
 
 
 @respx.mock
@@ -244,27 +278,96 @@ async def test_interrupted_first_sync_restarts_after_a_prune_drops_its_items() -
         assert _coverage(store, "issues") == [(window, date(2026, 3, 9))]
 
 
+@pytest.mark.parametrize("refresh", [False, True])
 @respx.mock
-async def test_interrupted_first_sync_restarts_when_the_window_moves_past_it() -> None:
+async def test_an_unfinished_sync_resumes_when_the_window_moves_past_it(
+    refresh: bool,
+) -> None:
+    """The rows a stopped sync left mixed are read again before the mark clears.
+
+    A refresh between the two keeps that boundary.
+    """
     from github_statistics.client import Budget, Transport
 
-    window, since = date(2026, 3, 6), "2026-03-05T23:59:59Z"
+    window, resume = date(2026, 3, 6), "2026-03-04T11:59:59Z"
+    reopened = [_listed(1, _at(4)), _listed(2, _at(5))]
     route = _serve(
         {
-            FIRST_SINCE: [[_listed(1, _at(4))], [_listed(2, _at(5))]],
-            since: [[_listed(3, _at(7))]],
+            FIRST_SINCE: [[_listed(n, _at(3), closed=_at(3)) for n in (1, 2)]],
+            "2026-03-03T11:59:59Z": [[reopened[0]], [reopened[1]]],
+            resume: [reopened],
+            "2026-03-05T23:59:59Z": [[]],
         }
     )
     with _store() as store:
-        await _sync(store, budget=Budget(rest=1))
+        assert (await _sync(store)).drained is True
+        assert (await _sync(store, budget=Budget(rest=1))).drained is False
+        if refresh:
+            run = importlib.import_module("github_statistics.collect.run")
+            run._refresh(store, ["acme/a"])
+        async with Transport(None, sleep=_instant, max_retries=0) as transport:
+            result = await _api().sync_items(
+                transport, store, "acme", "a", window_start=window, now=NOW
+            )
+
+        assert route.calls[-1].request.url.params["since"] == resume
+        assert result.drained is True and result.items == 2
+        rows = store.items_between(WINDOW, date(2026, 3, 9))
+        assert [item.closed_at for item in rows] == [None, None]
+        assert store.sync_state("acme/a", "items").unfinished is False
+        first = window if refresh else WINDOW
+        assert _coverage(store, "issues") == [(first, date(2026, 3, 9))]
+
+
+@pytest.mark.parametrize("restarted", [False, True])
+@respx.mock
+async def test_a_migrated_store_rereads_its_items_before_the_mark_clears(
+    tmp_path: Path, restarted: bool
+) -> None:
+    """A version-1 store rereads every stored item before the mark clears.
+
+    An interrupted version-1 refresh, or a restart for a later window
+    saved before its first page, leaves an item stored closed whose
+    reopening, in the same second, the listing has not returned.
+    """
+    import sqlite3
+    from datetime import timedelta
+
+    from github_statistics.client import Transport
+    from github_statistics.store import Item, Store, SyncState
+
+    path, window = tmp_path / "stats.sqlite", date(2026, 3, 6)
+    closed = _at(3)
+    stored = Item(
+        "acme/a", 1, "I_1", "issue", _at(1), closed, None, "alice", "User", closed
+    )
+    with Store(path) as store:
+        store.upsert_items([stored])
+        if restarted:
+            start = datetime(2026, 3, 5, 23, 59, 59, tzinfo=UTC)
+            store.set_sync_state(SyncState("acme/a", "items", oldest=start))
+    connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE sync_state DROP COLUMN unfinished")
+    connection.execute("PRAGMA user_version = 1")
+    connection.commit()
+    connection.close()
+    since = _text(closed - timedelta(seconds=1))
+    route = _serve({since: [[_listed(1, closed)]]})
+
+    with Store(path) as store:
+        migrated = store.sync_state("acme/a", "items")
+        assert migrated is not None and migrated.unfinished is True
         async with Transport(None, sleep=_instant, max_retries=0) as transport:
             result = await _api().sync_items(
                 transport, store, "acme", "a", window_start=window, now=NOW
             )
 
         assert route.calls[-1].request.url.params["since"] == since
-        assert result.drained is True and result.items == 1
-        assert _coverage(store, "issues") == [(window, date(2026, 3, 9))]
+        assert result.drained is True
+        rows = store.items_between(WINDOW, date(2026, 3, 9))
+        assert [item.closed_at for item in rows] == [None]
+        drained = store.sync_state("acme/a", "items")
+        assert drained is not None and drained.unfinished is False
 
 
 @pytest.mark.parametrize("change", ["wider window", "prune"])

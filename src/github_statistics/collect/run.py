@@ -75,7 +75,9 @@ class CollectResult:
     ``exhausted`` names the first step that ended with the REST or the
     GraphQL budget spent, or in which a collector reported a stop for a
     spent budget or a rate limit, else ``None``. ``stalled`` names repositories
-    whose run read a spent budget stopped inside one second.
+    whose run read a spent budget stopped inside one second. ``mid_sync``
+    names repositories in scope in the window whose last item sync
+    stopped short, so their item figures may mix two reads (§6.2).
     ``gap_days`` counts the window's days on which any enabled metric is
     not complete.
     """
@@ -90,6 +92,7 @@ class CollectResult:
     dropped: Mapping[str, str] = field(default_factory=dict)
     exhausted: str | None = None
     stalled: tuple[str, ...] = ()
+    mid_sync: tuple[str, ...] = ()
 
     @property
     def coverage_complete(self) -> bool:
@@ -109,13 +112,28 @@ def _only(scope: ResolvedScope, keys: Iterable[str]) -> ResolvedScope:
 
 
 def _refresh(store: Store, keys: Iterable[str]) -> None:
-    """Clear the sync state and coverage of ``keys``, keeping their rows."""
+    """Clear the sync state and coverage of ``keys``, keeping their rows.
+
+    An unfinished sync state keeps its mark, as the rows it marks stay
+    until a listing drains, and keeps in ``oldest`` the second before
+    its watermark, so the next scan reads its unread items again
+    (design §6.2).
+    """
     connection = store.connection
     connection.execute("BEGIN")
     try:
         for key in keys:
-            for table in ("sync_state", "coverage"):
-                connection.execute(f"DELETE FROM {table} WHERE repo = ?", (key,))
+            connection.execute(
+                "UPDATE sync_state SET oldest = COALESCE(strftime("
+                "'%Y-%m-%dT%H:%M:%SZ', watermark, '-1 seconds'), oldest),"
+                " watermark = NULL, etag = NULL, last_sync_at = NULL,"
+                " swept_to = NULL WHERE repo = ? AND unfinished",
+                (key,),
+            )
+            connection.execute(
+                "DELETE FROM sync_state WHERE repo = ? AND NOT unfinished", (key,)
+            )
+            connection.execute("DELETE FROM coverage WHERE repo = ?", (key,))
         connection.execute("COMMIT")
     except BaseException:
         connection.execute("ROLLBACK")
@@ -383,6 +401,10 @@ async def collect(
             await _sync(steps, transport, store, plan)
 
     coverage, gaps = window_coverage(store, owner, enabled, start, end)
+    mid_sync: tuple[str, ...] = ()
+    if metrics.pull_requests or metrics.issues:
+        mid_sync = tuple(store.unfinished(ITEMS_METRIC, start, end))
+        steps.mid_sync(mid_sync)
     stats = transport.stats
     return CollectResult(
         owner=owner,
@@ -395,4 +417,5 @@ async def collect(
         dropped=dropped,
         exhausted=steps.exhausted,
         stalled=tuple(sorted(steps.stalled)),
+        mid_sync=mid_sync,
     )

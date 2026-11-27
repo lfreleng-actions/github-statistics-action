@@ -11,7 +11,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 
-from .schema import SCHEMA_VERSION, create_schema
+from .schema import SCHEMA_VERSION, migrate_schema
 
 # Older SQLite builds bind at most 999 parameters in one statement; 500
 # leaves room for the other parameters of a query.
@@ -124,14 +124,15 @@ class StoreBase:
         return int(self._connection.execute("PRAGMA user_version").fetchone()[0])
 
     def _ensure_schema(self) -> None:
-        """Drop and recreate every table unless the file carries `SCHEMA_VERSION`."""
+        """Migrate, or rebuild, the store unless it carries `SCHEMA_VERSION`."""
         if self.schema_version() == SCHEMA_VERSION:
             return
-        # Another process may rebuild the store between the check above and
+        # Another process may migrate the store between the check above and
         # taking the write lock; check again under the lock so its rows stay.
         with self._transaction("IMMEDIATE") as connection:
-            if self.schema_version() != SCHEMA_VERSION:
-                create_schema(connection)
+            version = self.schema_version()
+            if version != SCHEMA_VERSION:
+                migrate_schema(connection, version)
 
     def _select_in(
         self,

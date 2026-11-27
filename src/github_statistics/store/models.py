@@ -90,7 +90,11 @@ class Member:
 
 @dataclass(frozen=True)
 class SyncState:
-    """How far the sync of one metric of one repository got (design §6.5)."""
+    """How far the sync of one metric of one repository got (design §6.5).
+
+    ``unfinished`` is true while the store holds pages of a sync that
+    has not read its listing to the end (design §6.2).
+    """
 
     repo: str
     metric: str
@@ -99,6 +103,7 @@ class SyncState:
     oldest: datetime | None = None
     last_sync_at: datetime | None = None
     swept_to: datetime | None = None
+    unfinished: bool = False
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -470,8 +470,11 @@ def test_write_rolls_back_on_an_exception() -> None:
         assert store.counts()["items"] == 1
 
 
-def test_schema_version_mismatch_drops_every_table(tmp_path: Path) -> None:
-    """A store stamped with another version is dropped and recreated."""
+@pytest.mark.parametrize("version", [99, 0])
+def test_schema_version_mismatch_drops_every_table(
+    tmp_path: Path, version: int
+) -> None:
+    """A store stamped with a version with no migration path is recreated."""
     from github_statistics.store import SCHEMA_VERSION, Store
 
     path = tmp_path / "stats.sqlite"
@@ -480,7 +483,7 @@ def test_schema_version_mismatch_drops_every_table(tmp_path: Path) -> None:
     connection = sqlite3.connect(path)
     connection.execute("CREATE TABLE stray(x)")
     connection.execute("CREATE TABLE sqlitecache(x)")
-    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    connection.execute(f"PRAGMA user_version = {version}")
     connection.commit()
     connection.close()
 
@@ -603,6 +606,68 @@ def test_purge_repository_leaves_nothing_behind() -> None:
             ).fetchone()[0]
             assert kept >= 1, table
         assert store.counts()["members"] == before["members"]
+
+
+def test_a_version_1_store_migrates_keeping_every_row(tmp_path: Path) -> None:
+    """A version-1 store gains the unfinished mark in place, rows kept.
+
+    Its item sync states start unfinished, as it cannot say whether
+    their last sync drained; other metrics' states do not. A repository
+    with items but no item sync state, as a refresh stopped before its
+    first page leaves, gains one. Each reads again from a second before
+    its earliest stored update, even after a restart for a later window
+    saved its own start before its first page.
+    """
+    from github_statistics.store import SCHEMA_VERSION, Store, SyncState
+
+    path = tmp_path / "stats.sqlite"
+    with Store(path) as store:
+        _fill(store, "acme/a", 1)
+        _fill(store, "acme/b", 2)
+        store.set_sync_state(
+            SyncState("acme/a", "items", watermark=_at(6), oldest=_at(5))
+        )
+        store.replace_members("acme", ["alice"], _day(1))
+        before = store.counts()
+    connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE sync_state DROP COLUMN unfinished")
+    connection.execute("PRAGMA user_version = 1")
+    connection.commit()
+    connection.close()
+
+    with Store(path) as store:
+        assert (store.schema_version(), SCHEMA_VERSION) == (2, 2)
+        assert 0 not in before.values()
+        assert store.counts() == {**before, "sync_state": before["sync_state"] + 1}
+        state = store.sync_state("acme/a", "issues")
+        assert state is not None and state.unfinished is False
+        earliest = _at(1) - timedelta(seconds=1)
+        for repo in ("acme/a", "acme/b"):
+            state = store.sync_state(repo, "items")
+            assert state == SyncState(repo, "items", oldest=earliest, unfinished=True)
+        assert store.unfinished("items", _day(1), _day(2)) == ["acme/a", "acme/b"]
+
+
+def test_unfinished_names_marked_repositories_in_scope(tmp_path: Path) -> None:
+    """A new store holds the mark; only repositories in scope count."""
+    from github_statistics.store import Store, SyncState
+
+    with Store(tmp_path / "stats.sqlite") as store:
+        assert store.schema_version() == 2
+        for repo in ("acme/a", "acme/b", "acme/c"):
+            store.enter_scope(repo, _day(3))
+            store.set_sync_state(SyncState(repo, "items", unfinished=repo != "acme/c"))
+        store.leave_scope("acme/b", _day(5))
+        store.enter_scope("acme/d", _day(3))
+        store.leave_scope("acme/d", _day(3))
+        store.set_sync_state(SyncState("acme/d", "items", unfinished=True))
+
+        state = store.sync_state("acme/a", "items")
+        assert state is not None and state.unfinished is True
+        assert store.unfinished("items", _day(1), _day(2)) == []
+        assert store.unfinished("items", _day(1), _day(4)) == ["acme/a", "acme/b"]
+        assert store.unfinished("items", _day(5), _day(6)) == ["acme/a"]
+        assert store.unfinished("runs", _day(1), _day(6)) == []
 
 
 def test_prune_drops_rows_before_the_day() -> None:

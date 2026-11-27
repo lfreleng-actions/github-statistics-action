@@ -104,7 +104,8 @@ class SiteTarget:
     concluded runs in the window and how many of them have a job count;
     ``None`` when not read. ``runs_partial`` is whether a workflows day
     lacks some repository's runs, unread job counts aside; ``None`` when
-    not read.
+    not read. ``mid_sync`` counts the repositories in scope whose last
+    item sync stopped short.
     """
 
     target: Target
@@ -116,6 +117,7 @@ class SiteTarget:
     runs_horizon: date | None = None
     job_runs: tuple[int, int] | None = None
     runs_partial: bool | None = None
+    mid_sync: int = 0
 
 
 def _environment() -> Environment:

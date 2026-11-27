@@ -77,6 +77,22 @@ class Store(AggregateStore):
         with self._transaction() as connection:
             connection.execute(_UPSERT_SYNC, codec.sync_row(state))
 
+    def unfinished(self, metric: str, from_day: date, to_day: date) -> list[str]:
+        """The repositories whose ``metric`` sync is unfinished, sorted.
+
+        Only those in scope on some day from ``from_day`` to ``to_day``;
+        an interval that opened and closed on one day holds no day.
+        """
+        rows = self._connection.execute(
+            "SELECT DISTINCT s.repo FROM sync_state AS s JOIN scope AS c"
+            " ON c.repo = s.repo WHERE s.metric = ? AND s.unfinished"
+            " AND c.from_day <= ? AND (c.to_day IS NULL"
+            " OR (c.to_day > ? AND c.to_day > c.from_day))"
+            " ORDER BY s.repo",
+            (metric, codec.day(to_day), codec.day(from_day)),
+        )
+        return [row[0] for row in rows]
+
     def store_item_page(self, items: Iterable[Item], state: SyncState) -> None:
         """Upsert one listing page of ``items`` and ``state`` in one transaction.
 

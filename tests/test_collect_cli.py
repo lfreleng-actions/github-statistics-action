@@ -150,7 +150,7 @@ def test_writes_the_outputs_and_job_summary(
     summary = tmp_path / "summary"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    _stub(monkeypatch, _result())
+    _stub(monkeypatch, _result(mid_sync=("acme/a",)))
 
     result = _invoke(tmp_path)
 
@@ -163,6 +163,8 @@ def test_writes_the_outputs_and_job_summary(
     text = summary.read_text(encoding="utf-8")
     assert "### Collection" in text
     assert "| acme | issues | 2 | 1 | 0 |" in text
+    assert "| acme | 7 | 2 | 1 | no | 1 | 1 |" in text
+    assert "| acme/a | items mid-sync; figures may mix two reads |" in text
 
 
 def test_a_rate_limited_seed_reports_a_spent_scope(

@@ -112,12 +112,23 @@ def _start(state: SyncState, window_start: date) -> tuple[SyncState, datetime]:
     watermark is older than the window's midnight also starts over,
     rather than rereading items the window no longer needs or restoring
     pruned ones; its new ``oldest`` keeps a later, wider window checked
-    against what this scan listed.
+    against what this scan listed. An unfinished scan the window has
+    passed resumes from its watermark instead, so the rows it left
+    mixing two reads are read again before a drained listing clears
+    its mark. One with no watermark, as a refresh or the version 2
+    migration leaves, keeps in ``oldest`` the point its unread items
+    lie after, and restarts from there when that is earlier.
     """
     midnight = datetime.combine(window_start, time(), tzinfo=UTC)
     start = midnight - _OVERLAP
+    if state.unfinished and state.watermark is None and state.oldest is not None:
+        start = min(start, state.oldest)
     behind = state.oldest is None or midnight < state.oldest
-    stale = state.watermark is not None and state.watermark < midnight
+    stale = (
+        state.watermark is not None
+        and state.watermark < midnight
+        and not state.unfinished
+    )
     if state.watermark is None or behind or stale:
         restart = dataclasses.replace(
             state, watermark=None, oldest=start, last_sync_at=None
@@ -168,7 +179,9 @@ async def sync_items(
     ``410`` or a ``5xx``
     left after the transport's retries marks the repository unreadable
     with no coverage change. Coverage of both metrics, over the window,
-    is added only when the listing is read to its end.
+    is added only when the listing is read to its end. Storing a page
+    marks the sync unfinished, and reading to the end clears the mark,
+    so a sync stopped short leaves it while coverage stays as it was.
     """
     key = f"{owner}/{repo}"
     saved = store.sync_state(key, ITEMS_METRIC)
@@ -203,7 +216,9 @@ async def sync_items(
                 )
             items = [_item(key, data) for data in page]
             if items:
-                state = dataclasses.replace(state, watermark=items[-1].updated_at)
+                state = dataclasses.replace(
+                    state, watermark=items[-1].updated_at, unfinished=True
+                )
                 store.store_item_page(items, state)
                 stored += len(items)
         drained = True
@@ -217,7 +232,8 @@ async def sync_items(
             log.warning("cannot read items of %s: HTTP %s", key, status)
             return ItemSyncResult(key, stored, pages, drained=False, unreadable=status)
     if drained:
-        store.set_sync_state(dataclasses.replace(state, last_sync_at=now))
+        done = dataclasses.replace(state, last_sync_at=now, unfinished=False)
+        store.set_sync_state(done)
         _add_coverage(store, key, window_start, now)
     return ItemSyncResult(key, stored, pages, drained)
 
