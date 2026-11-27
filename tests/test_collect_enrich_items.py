@@ -364,6 +364,36 @@ async def test_last_point_reads_one_item_so_runs_progress() -> None:
 
 
 @respx.mock
+@pytest.mark.xfail(strict=True, reason="last-point stop blames the points")
+async def test_last_point_read_past_the_deadline_names_the_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A last-point read the clock outlasts names the time limit, not the point."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    items = [_item(n, updated=_at(10 - n)) for n in (1, 2)]
+    answer = _data({f"I_{n}": _issue(n, closed=False) for n in (1, 2)})
+
+    def read_then_time_out(variables: dict[str, Any]) -> httpx.Response:
+        now[0] = 60.0
+        return answer(variables)
+
+    route = _serve(read_then_time_out)
+    budget = Budget(graphql_points=1, deadline=60.0, clock=lambda: now[0])
+    with _store(*items) as store:
+        with caplog.at_level(logging.INFO):
+            result = await _enrich(store, budget)
+
+        assert route.call_count == 1
+        assert result.items == 1 and result.remaining == ("I_2",)
+        assert "point left" not in caplog.text
+        [record] = [r for r in caplog.records if "time limit" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@respx.mock
 async def test_batch_is_halved_after_a_502() -> None:
     nodes = {"I_1": _issue(1), "I_2": _issue(2)}
     answer = _data(nodes)
@@ -508,6 +538,76 @@ async def test_long_review_history_never_holds_back_shorter_items(
             assert "acme/a#1" in caplog.text
             assert "budget.graphql_points" not in caplog.text
             assert [i.number for i in store.items_needing_enrichment(REPO, 10)] == [1]
+
+
+@respx.mock
+@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
+@pytest.mark.parametrize("rest_first", [False, True])
+async def test_time_limit_paging_reviews_names_the_limit(
+    caplog: pytest.LogCaptureFixture, rest_first: bool
+) -> None:
+    """The time limit is named even when the REST count ran out before it."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    answer = _data({"PR_1": _pr(1, [_review(1)], more="c")})
+
+    def first_query_then_time_out(variables: dict[str, Any]) -> httpx.Response:
+        now[0] = 60.0
+        return answer(variables)
+
+    route = _serve(first_query_then_time_out)
+    budget = Budget(rest=0 if rest_first else 1, deadline=60.0, clock=lambda: now[0])
+    assert budget.rest_exhausted is rest_first
+    with _store(_item(1, pr=True)) as store:
+        with caplog.at_level(logging.INFO):
+            result = await _enrich(store, budget)
+
+        assert route.call_count == 1
+        assert result.items == 0 and result.remaining == ("PR_1",)
+        assert "budget" not in caplog.text
+        messages = {
+            r.getMessage(): r.levelno
+            for r in caplog.records
+            if "was reached" in r.getMessage()
+        }
+        assert messages == {
+            "the time limit was reached paging the reviews of acme/a#1;"
+            " it is read again next run": logging.INFO,
+            "the time limit was reached before any item was completed;"
+            " 1 wait for the next run": logging.INFO,
+        }
+
+
+@respx.mock
+@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
+@pytest.mark.parametrize("rest_first", [False, True])
+async def test_time_limit_after_a_completed_batch_names_the_limit(
+    caplog: pytest.LogCaptureFixture, rest_first: bool
+) -> None:
+    """A batch the clock stops after one was completed names the time limit."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    answer = _data({f"I_{i}": _issue(i) for i in range(1, 52)})
+
+    def first_batch_then_time_out(variables: dict[str, Any]) -> httpx.Response:
+        now[0] = 60.0
+        return answer(variables)
+
+    route = _serve(first_batch_then_time_out)
+    budget = Budget(rest=0 if rest_first else 1, deadline=60.0, clock=lambda: now[0])
+    assert budget.rest_exhausted is rest_first
+    with _store(*(_item(i) for i in range(1, 52))) as store:
+        with caplog.at_level(logging.INFO):
+            result = await _enrich(store, budget)
+
+        assert route.call_count == 1
+        assert result.items == 50 and len(result.remaining) == 1
+        assert "budget" not in caplog.text
+        [record] = [r for r in caplog.records if "time limit" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 @respx.mock

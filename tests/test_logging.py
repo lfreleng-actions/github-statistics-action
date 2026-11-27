@@ -329,6 +329,27 @@ async def test_a_stop_names_the_time_limit_when_it_came_first(
     assert f"{cause} in the backfill step; the next run resumes" in messages
 
 
+@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
+async def test_a_step_stopped_past_the_deadline_names_the_time_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A refusal that blames the budget is logged as the time limit it was."""
+    from github_statistics.client import Budget, BudgetExhaustedError, Transport
+    from github_statistics.collect.steps import Steps
+
+    async def refused() -> None:
+        raise BudgetExhaustedError("no GraphQL budget left for a query costing 1")
+
+    budget = Budget(deadline=1.0, clock=lambda: 2.0)
+    async with Transport(None, sleep=_instant, budget=budget) as transport:
+        with caplog.at_level(logging.INFO):
+            await Steps(transport).run("backfill", refused())
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert "backfill step stopped: time limit reached" in messages
+    assert not [m for m in messages if "budget" in m]
+
+
 def _logged(caplog: pytest.LogCaptureFixture) -> set[tuple[str, str]]:
     """The steps and repositories with a progress line in ``caplog``."""
     return {

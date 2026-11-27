@@ -632,6 +632,58 @@ async def test_a_read_the_budget_stops_within_one_second_is_stalled(
         assert "2026-03-07T12:00:00Z" in caplog.text
 
 
+def _timed_out_after(requests: int) -> Any:
+    """A budget whose time limit passes once ``requests`` REST requests are spent."""
+    from github_statistics.client import Budget
+
+    budget = Budget(deadline=1.0)
+    budget.clock = lambda: float(budget.rest_spent >= requests)
+    return budget
+
+
+@respx.mock
+@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
+async def test_a_read_the_time_limit_stops_names_the_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    runs = [_listed(0, _at(9))]
+    runs += [_listed(i, _at(7, 12)) for i in range(1, 151)]
+    _Actions(runs)
+    with _store() as store:
+        _seed(store, watermark=_at(9), etag=ETAG, oldest=_midnight(date(2026, 3, 8)))
+        await _sync(store, budget=_timed_out_after(2))
+
+        with caplog.at_level(logging.INFO):
+            again = await _sync(store, budget=_timed_out_after(2))
+
+        assert again.stalled is True
+        assert "budget" not in caplog.text
+        [record] = [
+            r for r in caplog.records if "2026-03-07T12:00:00Z" in r.getMessage()
+        ]
+        assert record.getMessage().startswith(
+            "time limit reached within runs of acme/a"
+        )
+        assert record.levelno == logging.INFO
+
+
+@respx.mock
+@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
+async def test_paging_past_a_watermark_the_time_limit_stops_names_the_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    runs = [_listed(i, _at(5) + timedelta(minutes=i)) for i in range(1, 251)]
+    _Actions(runs)
+    with _store() as store:
+        _seed(store, watermark=_at(1), oldest=_midnight(WINDOW))
+        with caplog.at_level(logging.INFO):
+            cut = await _sync(store, budget=_timed_out_after(2))
+
+        assert (cut.current, cut.runs) == (False, 200)
+        assert "budget" not in caplog.text
+        assert "time limit reached paging runs of acme/a" in caplog.text
+
+
 @respx.mock
 async def test_a_quiet_gap_is_probed_across_and_covered() -> None:
     window = date(2026, 1, 14)
