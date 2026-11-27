@@ -25,6 +25,7 @@ from github_statistics.client import (
 )
 from github_statistics.store import Store
 
+from .common import last_point
 from .enrich_items import BATCH_COST, BATCH_SIZE, PAGE_COST, _not_found
 
 log = logging.getLogger(__name__)
@@ -134,7 +135,8 @@ async def enrich_jobs(
     When fewer points are left than a batch may cost, one run is read
     alone; when the budget runs out, counting stops cleanly with the
     ids it did not reach in ``remaining``, and a run that completes
-    nothing logs a warning naming ``budget.graphql_points``. A batch
+    nothing logs a warning naming ``budget.graphql_points``, or names
+    the time limit at ``INFO`` when that stopped it. A batch
     that fails is halved; an id that fails alone is logged and left in
     ``failed`` for the next run. A ``FORBIDDEN`` check suite, a token
     without ``checks: read``, logs one warning and ends the step, as
@@ -172,7 +174,7 @@ async def enrich_jobs(
         store.set_job_counts(counts)
         done.update(chunk)
         if last:
-            raise BudgetExhaustedError("one GraphQL point left; read one run")
+            raise last_point(transport, "run")
 
     def describe(chunk: list[str]) -> str:
         """Name a batch in the log."""
@@ -186,9 +188,16 @@ async def enrich_jobs(
     budget = transport.budget
     # A step ended by _read has logged its own cause; more points cannot help.
     if remaining and not done and not stopped and budget and budget.graphql_exhausted:
-        log.warning(
-            "the GraphQL budget was too small to count the jobs of any run;"
-            " %d wait for the next run: raise budget.graphql_points",
-            len(remaining),
-        )
+        if budget.stop_reason("graphql") == "time":
+            log.info(
+                "the time limit was reached before any run's jobs were counted;"
+                " %d wait for the next run",
+                len(remaining),
+            )
+        else:
+            log.warning(
+                "the GraphQL budget was too small to count the jobs of any run;"
+                " %d wait for the next run: raise budget.graphql_points",
+                len(remaining),
+            )
     return JobsResult(runs=len(done), failed=tuple(out.failed), remaining=remaining)

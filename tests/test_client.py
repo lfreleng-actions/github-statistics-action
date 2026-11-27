@@ -479,6 +479,25 @@ def test_budget_records_whether_a_count_stopped_it_before_the_deadline() -> None
     assert counted.stopped_by_count
 
 
+def test_budget_stop_reason_names_what_stopped_it_first() -> None:
+    """The deadline is the reason only when no count stopped the run first."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    timed = Budget(deadline=60.0, clock=lambda: now[0])
+    rest = Budget(rest=1, deadline=60.0, clock=lambda: now[0])
+    points = Budget(graphql_points=1, deadline=60.0, clock=lambda: now[0])
+    assert timed.stop_reason() is None
+    assert rest.try_spend_rest() and not rest.try_spend_rest()
+    assert not points.try_spend_graphql(2)
+
+    now[0] = 60.0
+
+    assert timed.stop_reason() == "time"
+    assert rest.stop_reason() == "rest"
+    assert points.stop_reason() == "graphql"
+
+
 async def test_a_queued_query_holding_every_point_is_not_a_count_stop() -> None:
     """Points a query holds, then gives back unsent at the deadline, stop nothing."""
     import asyncio
@@ -538,7 +557,6 @@ async def test_graphql_waiting_or_retrying_past_the_deadline_is_not_sent() -> No
     assert budget.graphql_spent == 1
 
 
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 @pytest.mark.parametrize("retried", [False, True])
 async def test_graphql_refused_past_the_deadline_names_the_time_limit(
     retried: bool,
@@ -565,7 +583,6 @@ async def test_graphql_refused_past_the_deadline_names_the_time_limit(
     assert route.call_count == int(retried)
 
 
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 async def test_rest_refused_past_the_deadline_names_the_time_limit() -> None:
     """A REST request refused at the deadline says so, not that the budget ran out."""
     from github_statistics.client import Budget, BudgetExhaustedError
@@ -581,7 +598,6 @@ async def test_rest_refused_past_the_deadline_names_the_time_limit() -> None:
     assert route.call_count == 0
 
 
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 async def test_rest_retry_refused_past_the_deadline_names_the_time_limit() -> None:
     """A retry refused at the deadline names it, with REST requests still left."""
     from github_statistics.client import Budget, BudgetExhaustedError
@@ -604,7 +620,6 @@ async def test_rest_retry_refused_past_the_deadline_names_the_time_limit() -> No
     assert budget.rest_spent == 1
 
 
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 def test_budget_stop_reason_of_one_resource_names_the_time_limit() -> None:
     """A resource the clock stopped after the other's count ran out names it."""
     from github_statistics.client import Budget

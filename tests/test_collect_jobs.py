@@ -236,7 +236,6 @@ async def test_last_point_reads_one_run() -> None:
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="last-point stop blames the points")
 async def test_last_point_read_past_the_deadline_names_the_limit(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -282,7 +281,6 @@ async def test_budget_completing_no_run_names_the_setting(
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 @pytest.mark.parametrize("rest_first", [False, True])
 async def test_time_limit_counting_no_run_names_the_limit(
     caplog: pytest.LogCaptureFixture, rest_first: bool
@@ -309,7 +307,6 @@ async def test_time_limit_counting_no_run_names_the_limit(
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 @pytest.mark.parametrize("rest_first", [False, True])
 async def test_time_limit_after_a_counted_batch_names_the_limit(
     caplog: pytest.LogCaptureFixture, rest_first: bool

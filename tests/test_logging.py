@@ -329,7 +329,6 @@ async def test_a_stop_names_the_time_limit_when_it_came_first(
     assert f"{cause} in the backfill step; the next run resumes" in messages
 
 
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 async def test_a_step_stopped_past_the_deadline_names_the_time_limit(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

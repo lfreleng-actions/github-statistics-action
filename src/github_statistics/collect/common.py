@@ -11,7 +11,8 @@ from typing import Any, TypeVar
 
 import httpx
 
-from github_statistics.client import AuthError
+from github_statistics.client import AuthError, BudgetExhaustedError, Transport
+from github_statistics.client.budget import Resource
 from github_statistics.client.policy import rate_limited
 from github_statistics.scope import ResolvedScope
 from github_statistics.store import Store
@@ -51,6 +52,32 @@ async def run_concurrently(syncs: Iterable[Coroutine[Any, Any, T]]) -> list[T]:
     except ExceptionGroup as failures:
         raise (failures.subgroup(AuthError) or failures).exceptions[0] from None
     return [task.result() for task in tasks]
+
+
+def stop_cause(
+    transport: Transport, exc: BudgetExhaustedError, resource: Resource | None = None
+) -> str:
+    """Why ``exc`` stopped a read: the time limit when the clock ended it.
+
+    Past the deadline the budget reports itself spent, so a refusal the
+    transport raises then may still blame a spent budget. ``resource``,
+    when the read spends only that, asks what stopped it alone rather
+    than the run.
+    """
+    budget = transport.budget
+    if budget is not None and budget.stop_reason(resource) == "time":
+        return "time limit reached"
+    return str(exc)
+
+
+def last_point(transport: Transport, what: str) -> BudgetExhaustedError:
+    """The stop after the last GraphQL point read a single ``what``.
+
+    It names the time limit when the deadline passed first, as
+    ``stop_cause`` does, so the read cannot blame the points instead.
+    """
+    spent = BudgetExhaustedError(f"one GraphQL point left; read one {what}")
+    return BudgetExhaustedError(stop_cause(transport, spent, "graphql"))
 
 
 def unreadable_status(exc: httpx.HTTPStatusError) -> int | None:

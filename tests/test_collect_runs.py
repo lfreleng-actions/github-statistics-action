@@ -642,7 +642,6 @@ def _timed_out_after(requests: int) -> Any:
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 async def test_a_read_the_time_limit_stops_names_the_limit(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -668,7 +667,6 @@ async def test_a_read_the_time_limit_stops_names_the_limit(
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 async def test_paging_past_a_watermark_the_time_limit_stops_names_the_limit(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

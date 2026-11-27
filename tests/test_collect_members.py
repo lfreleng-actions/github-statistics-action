@@ -179,7 +179,6 @@ async def test_a_spent_budget_keeps_the_stored_lists(
     assert record.levelno == logging.WARNING
 
 
-@pytest.mark.xfail(strict=True)
 async def test_the_time_limit_keeps_the_stored_lists_at_info(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

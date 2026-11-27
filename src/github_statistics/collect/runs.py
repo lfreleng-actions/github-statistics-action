@@ -37,7 +37,7 @@ from github_statistics.client.policy import rate_limited
 from github_statistics.scope import ResolvedScope
 from github_statistics.store import Run, Store, SyncState
 
-from .common import run_concurrently, scope_keys, unreadable_status
+from .common import run_concurrently, scope_keys, stop_cause, unreadable_status
 from .listed import listed_run, reaches
 from .reader import PER_PAGE, RUNS_KEY, SliceReader
 from .slices import DAY, SECOND, first_full_day, midnight, slice_below, timestamp
@@ -121,7 +121,8 @@ class _RunSync(SliceReader):
         try:
             await phase()
         except BudgetExhaustedError as exc:
-            log.info("stopped syncing runs of %s: %s", self.key, exc)
+            cause = stop_cause(self.transport, exc, "rest")
+            log.info("stopped syncing runs of %s: %s", self.key, cause)
             return False
         except httpx.HTTPStatusError as exc:
             status = unreadable_status(exc)
@@ -275,7 +276,10 @@ class _RunSync(SliceReader):
                     if reaches(batch, since):
                         break
             except BudgetExhaustedError as exc:
-                log.info("budget spent paging runs of %s; next sync resumes", self.key)
+                budget = self.transport.budget
+                timed = budget is not None and budget.stop_reason("rest") == "time"
+                cause = "time limit reached" if timed else "budget spent"
+                log.info("%s paging runs of %s; next sync resumes", cause, self.key)
                 stopped = exc
         oldest = state.oldest or self.target
         hole = None

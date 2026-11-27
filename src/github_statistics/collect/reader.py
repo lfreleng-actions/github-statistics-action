@@ -97,9 +97,13 @@ class SliceReader:
         except BudgetExhaustedError:
             if bottom is not None:
                 if bottom >= high:
-                    log.warning(
-                        "budget spent within runs of %s created at %s; "
+                    budget = self.transport.budget
+                    timed = budget is not None and budget.stop_reason("rest") == "time"
+                    log.log(
+                        logging.INFO if timed else logging.WARNING,
+                        "%s within runs of %s created at %s; "
                         "the next sync re-reads them",
+                        "time limit reached" if timed else "budget spent",
                         self.key,
                         timestamp(high),
                     )

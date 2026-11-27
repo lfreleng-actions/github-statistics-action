@@ -364,7 +364,6 @@ async def test_last_point_reads_one_item_so_runs_progress() -> None:
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="last-point stop blames the points")
 async def test_last_point_read_past_the_deadline_names_the_limit(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -541,7 +540,6 @@ async def test_long_review_history_never_holds_back_shorter_items(
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 @pytest.mark.parametrize("rest_first", [False, True])
 async def test_time_limit_paging_reviews_names_the_limit(
     caplog: pytest.LogCaptureFixture, rest_first: bool
@@ -580,7 +578,6 @@ async def test_time_limit_paging_reviews_names_the_limit(
 
 
 @respx.mock
-@pytest.mark.xfail(strict=True, reason="a time-out still blames the budget")
 @pytest.mark.parametrize("rest_first", [False, True])
 async def test_time_limit_after_a_completed_batch_names_the_limit(
     caplog: pytest.LogCaptureFixture, rest_first: bool
