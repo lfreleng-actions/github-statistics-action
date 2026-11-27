@@ -4,7 +4,9 @@
 
 Each charted metric gets a line counting its complete days of those it
 can have; a total of a metric with a partial day reads as a lower
-bound, and jobs say for how many runs they were counted.
+bound, and jobs say for how many runs they were counted. While some
+repository's item sync is unfinished, the item metrics' lines say how
+many, and their totals read as lower bounds (design §6.2).
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ HORIZON_NOTE = (
     "GitHub lists workflow runs for about a year; earlier days show as no data."
 )
 _RUN_METRICS = ("workflows", "workflow_outcomes")
+_ITEM_METRICS = ("pull_requests", "issues")
 
 
 def days_text(count: int) -> str:
@@ -53,6 +56,9 @@ def figure(
 ) -> str:
     """One total of ``metric`` in words, ``at least`` when it has a partial day.
 
+    An item metric's total is ``at least`` too while some repository's
+    item sync is unfinished, as it may mix two reads.
+
     A total of ``jobs``, while some concluded run has no job count, says
     for how many runs it was counted; in a view other than ``all`` it
     reads as a lower bound instead, as the run counts span every class.
@@ -68,7 +74,8 @@ def figure(
         return f"at least {amount}"
     if jobs and counts and site.runs_partial is not None:
         return f"at least {amount}" if site.runs_partial else amount
-    if Coverage.PARTIAL in site.series.coverage.get(metric, ()):
+    mixed = site.mid_sync and metric in _ITEM_METRICS
+    if mixed or Coverage.PARTIAL in site.series.coverage.get(metric, ()):
         return f"at least {amount}"
     return amount
 
@@ -77,7 +84,8 @@ def coverage_lines(site: SiteTarget) -> list[tuple[str, str]]:
     """Per charted metric, its label and its complete days of those it can have.
 
     For a run metric the days before the runs horizon are left out of
-    the count, and the line says how many and why.
+    the count, and the line says how many and why. An item metric's line
+    says how many repositories are mid-sync, if any.
     """
     lines = []
     for metric, grades in site.series.coverage.items():
@@ -87,6 +95,10 @@ def coverage_lines(site: SiteTarget) -> list[tuple[str, str]]:
         text = f"{complete} of {days_text(len(counted))} complete"
         if before:
             text += f" ({days_text(before)} before GitHub's run history)"
+        if site.mid_sync and metric in _ITEM_METRICS:
+            noun = "repository" if site.mid_sync == 1 else "repositories"
+            text += f" ({site.mid_sync} {noun} mid-sync;"
+            text += " their figures may mix two reads)"
         lines.append((COVERAGE_LABELS[metric], text))
     return lines
 

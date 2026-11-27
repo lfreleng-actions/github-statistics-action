@@ -153,6 +153,7 @@ def _tables(results: Sequence[CollectResult]) -> list[_Table]:
             str(result.not_modified),
             result.exhausted or "no",
             str(result.gap_days),
+            str(len(result.mid_sync)),
         ]
         for result in results
     ]
@@ -170,6 +171,11 @@ def _tables(results: Sequence[CollectResult]) -> list[_Table]:
     repositories += [
         [key, "runs read stalled"] for result in results for key in result.stalled
     ]
+    repositories += [
+        [key, "items mid-sync; figures may mix two reads"]
+        for result in results
+        for key in result.mid_sync
+    ]
     tables: list[_Table] = [
         (
             "Collection",
@@ -180,6 +186,7 @@ def _tables(results: Sequence[CollectResult]) -> list[_Table]:
                 "304s",
                 "Budget spent in",
                 "Gap days",
+                "Mid-sync",
             ],
             runs,
         ),

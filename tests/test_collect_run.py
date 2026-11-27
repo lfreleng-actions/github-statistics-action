@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 from collections.abc import Iterable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -397,6 +398,25 @@ async def test_refresh_clears_watermarks_and_coverage(
     assert fakes.calls.index(starts[0]) < fakes.calls.index(("runs.recent", "acme/a"))
 
 
+async def test_refresh_keeps_the_unfinished_mark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``refresh`` keeps an unfinished sync's mark and its unread boundary."""
+    from github_statistics.store import SyncState
+
+    store = _store()
+    store.set_sync_state(
+        SyncState("acme/a", "items", watermark=NOW, oldest=NOW, unfinished=True)
+    )
+    _Fakes(monkeypatch, _scope("a"))
+
+    await _collect(store, refresh=True)
+
+    assert store.sync_state("acme/a", "items") == SyncState(
+        "acme/a", "items", oldest=NOW - timedelta(seconds=1), unfinished=True
+    )
+
+
 @respx.mock
 async def test_an_empty_scope_makes_no_further_call(
     monkeypatch: pytest.MonkeyPatch,
@@ -512,6 +532,28 @@ async def test_reports_unreadable_and_stalled_repositories(
         "acme/b": "items: HTTP 404",
     }
     assert result.stalled == ("acme/b",)
+
+
+async def test_reports_and_logs_repositories_mid_sync(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A repository whose last item sync stopped short is named and counted."""
+    from github_statistics.store import SyncState
+
+    store = _store()
+    _Fakes(monkeypatch, _scope("a", "b"))
+    for repo in ("acme/a", "acme/b"):
+        store.enter_scope(repo, date(2026, 1, 1))
+    store.set_sync_state(SyncState("acme/b", "items", unfinished=True))
+
+    with caplog.at_level(logging.INFO, logger="github_statistics.collect"):
+        result = await _collect(store)
+
+    assert result.mid_sync == ("acme/b",)
+    assert (
+        "1 repository mid-sync; their issue and pull request figures"
+        " may mix two reads: acme/b"
+    ) in caplog.messages
 
 
 async def test_reports_window_coverage(monkeypatch: pytest.MonkeyPatch) -> None:

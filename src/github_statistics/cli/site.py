@@ -114,7 +114,7 @@ def site_targets(
     exit `fail` builds.
     """
     # Imported here so other commands start without loading matplotlib.
-    from github_statistics.collect import runs_horizon
+    from github_statistics.collect import ITEMS_METRIC, runs_horizon
     from github_statistics.series import (
         build_leaderboard,
         build_repositories,
@@ -149,6 +149,8 @@ def site_targets(
                 horizon = runs_horizon(store, target.owner)
                 job_runs = _job_runs(store, target.owner, series.days, identities)
                 runs_partial = _runs_partial(store, target.owner, series.days)
+                days = series.days
+                mid_sync = store.unfinished(ITEMS_METRIC, days[0], days[-1])
         except sqlite3.DatabaseError as exc:
             raise fail(f"cannot read the store at {path}: {exc}") from None
         except StaleStoreError:
@@ -172,6 +174,7 @@ def site_targets(
                 runs_horizon=horizon,
                 job_runs=job_runs,
                 runs_partial=runs_partial,
+                mid_sync=len(mid_sync),
             )
         )
     return built

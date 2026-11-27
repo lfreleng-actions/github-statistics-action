@@ -708,6 +708,20 @@ def test_site_command_reads_the_horizon_and_job_counts(tmp_path: Path) -> None:
     assert "Workflows: 0 of 9 days complete (1 day before GitHub" in text
 
 
+def test_site_command_counts_repositories_mid_sync(tmp_path: Path) -> None:
+    from github_statistics.store import Store, SyncState, store_path
+
+    _seed(tmp_path / "cache", "acme", "acme/a", "alice")
+    with Store(store_path(tmp_path / "cache", "api.github.com", "acme")) as store:
+        store.set_sync_state(SyncState("acme/a", "items", unfinished=True))
+    result = _run(tmp_path, "site", "acme")
+    assert result.exit_code == 0, result.output
+    text = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    note = "(1 repository mid-sync; their figures may mix two reads)</li>"
+    assert f"Pull requests: 5 of 10 days complete {note}" in text
+    assert "<dt>Pull requests opened</dt><dd>at least 1</dd>" in text
+
+
 def test_site_command_gives_plain_jobs_when_only_ignored_runs_lack_counts(
     tmp_path: Path,
 ) -> None:

@@ -657,7 +657,13 @@ restart and that clearing commit in one transaction before the sync
 requests its first page, so a retry whose budget runs out first does not
 clear pull requests enrichment has read since. A sync also
 starts over when the window now starts after its watermark, rather
-than reread items the window no longer needs or restore pruned ones.
+than reread items the window no longer needs or restore pruned ones,
+except an `unfinished` sync: that one resumes from the watermark and
+reads again the items it left a mix of two reads before the mark
+clears. An `unfinished` sync with no watermark, which a refresh or the
+version 2 migration leaves (§6.1), holds in `oldest` the point its
+unread items lie after, and starts from that point when that precedes
+the window start.
 The watermark, kept in `sync_state` under the metric `items`, is the last
 `updated_at` seen; because ordering
 is by `updated_at` ascending, the sync can
@@ -704,6 +710,18 @@ before those without, so the quick incremental work goes first. Each
 keeps the spelling of its name the `scope` table holds, as names
 compare without case, so a rename in case alone keeps its watermark,
 items and coverage under one key.
+
+Coverage, once added, stays, but each page a later sync reads
+overwrites the items it lists, so a sync that stops short leaves the
+repository's rows a mix of two reads under coverage the earlier one
+earned: an item reopened on a page read shows open, while one reopened
+on a page not reached still shows closed. Each page a sync stores sets
+`unfinished` on the repository's `items` sync state in the same
+transaction, and the sync that reads the listing to its end clears it.
+A sync that stops before storing a page leaves the mark unchanged,
+since it changed no row. No coverage goes: the read side (§6.5, §7.3,
+§8.5) gives the number of repositories in scope in this state, and the
+next sync that drains ends it.
 
 An item created before the window but closed inside it arrives because
 closing updates `updated_at`. An item closed and then reopened arrives
@@ -990,12 +1008,16 @@ as unreadable, as it does one with an item or a run whose enrichment
 read failed alone. One repository failing
 never fails the run: the run reports it as unreadable and goes on.
 `collect --refresh` first clears the scope's watermarks and coverage,
-keeping its stored rows, so the run reads the window again; `--strict`
+keeping its stored rows and any `unfinished` mark on them, whose
+watermark becomes `oldest` (§6.2), so the run reads the window again,
+and any items an unfinished sync left unread; `--strict`
 exits 2 after the last target if any repository was unreadable,
 and a rejected token exits 3 at once, naming the variable that holds
 it. Each run prints, and appends to the job summary, its requests,
 GraphQL points and `304`s, each charted metric's days by coverage
-grade, and the unreadable, dropped and stalled repositories, and
+grade, the repositories in scope whose last item sync stopped short
+(§6.2) and their number, also logged once at the end of the run, the
+unreadable, dropped and stalled repositories, and
 writes the `requests_used`, `coverage_complete` and `gap_days`
 outputs (§9.1).
 
@@ -1316,9 +1338,11 @@ none does or no repository is in scope. Two rules override it:
   collector reads its count.
 
 Partial and none become gap columns (§8.3); the page footer states the
-count. Charts default to five views per metric (`all` and the four
-classes); `classes` in the configuration can add the `humans` and
-`bots` aggregates or drop views.
+count. A repository whose item sync is `unfinished` (§6.2) leaves the
+grades unchanged; the coverage lines and totals of §8.5 give the
+number of repositories in that state instead. Charts default to five
+views per metric (`all` and the four classes); `classes` in the
+configuration can add the `humans` and `bots` aggregates or drop views.
 
 ### 7.4 Leaderboards and repository table
 
@@ -1545,7 +1569,9 @@ The landing card gives, for the window, pull requests opened and merged
 (both counted by the series' rules, so a deleted author's pull requests
 count; the leaderboard leaves those out), issues opened and closed,
 workflow runs and jobs, and the repositories in scope on the last day. A
-total of a metric with any partial day in the window reads `at least N`.
+total of a metric with any partial day in the window reads `at least N`,
+and so do the pull request and issue totals while some repository in
+scope is mid-sync (§6.2).
 Jobs, while some concluded run in the window has no job count yet
 (§6.4), read `N (counted for X of Y runs)`, X and Y the concluded runs
 with a job count and every concluded run, among the runs the total
@@ -1559,8 +1585,10 @@ the target page give one coverage line per charted metric, `Pull
 requests: 365 of 365 days complete`. For a run metric the count leaves
 out the days before the runs horizon, which can never be complete, and
 says so: `Workflows: 0 of 324 days complete (41 days before GitHub's run
-history)`. A target page has a section per charted metric with one tab
-per view, built from radio inputs and CSS so it works without
+history)`. While some repository in scope is mid-sync, the `Pull
+requests` and `Issues` lines add `(N repositories mid-sync; their
+figures may mix two reads)`. A target page has a section per charted
+metric with one tab per view, built from radio inputs and CSS so it works without
 JavaScript; each tab shows the 1920-px derivative with its size,
 descriptive `alt` text and a link to the master, and every image but the
 first carries `loading="lazy"`. A note counts the days without data, or

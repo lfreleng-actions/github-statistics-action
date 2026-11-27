@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import Awaitable, Coroutine, Iterable, Mapping
+from collections.abc import Awaitable, Coroutine, Iterable, Mapping, Sequence
 from typing import Any, TypeVar
 
 import httpx
@@ -216,6 +216,18 @@ class Steps:
             if done is False and sync.result().unreadable is None:
                 self.stop(step)
         self._release(step=step)
+
+    def mid_sync(self, keys: Sequence[str]) -> None:
+        """Log the repositories whose item sync stopped short, and how many."""
+        if keys:
+            noun = "repository" if len(keys) == 1 else "repositories"
+            log.info(
+                "%d %s mid-sync; their issue and pull request"
+                " figures may mix two reads: %s",
+                len(keys),
+                noun,
+                ", ".join(keys),
+            )
 
     def failed(self, what: str, keys: Iterable[str]) -> None:
         """Record each repository in ``keys`` as unreadable for ``what``.
