@@ -235,6 +235,7 @@ SYNC_COLUMNS = (
     "last_sync_at",
     "swept_to",
     "unfinished",
+    "cursor",
 )
 
 
@@ -249,6 +250,7 @@ def sync_row(state: SyncState) -> tuple[Any, ...]:
         timestamp(state.last_sync_at),
         timestamp(state.swept_to),
         int(state.unfinished),
+        state.cursor,
     )
 
 
@@ -263,4 +265,5 @@ def sync_from_row(row: sqlite3.Row) -> SyncState:
         last_sync_at=parse_timestamp(row["last_sync_at"]),
         swept_to=parse_timestamp(row["swept_to"]),
         unfinished=bool(row["unfinished"]),
+        cursor=row["cursor"],
     )

@@ -539,7 +539,8 @@ with items gets an `items` sync state, which a refresh stopped before
 its first page leaves out, and each one starts unfinished, with no
 watermark and an `oldest` no later than one second before its earliest
 stored `updated_at`, so its next scan rereads every stored item that
-may have changed since) run in order in
+may have changed since; version 2 to 3 adds `sync_state.cursor`, empty)
+run in order in
 one transaction, which then stamps the new version, so every row stays
 and no cold start follows. A version the code does not know, newer than
 its own or with no migration path, drops every table and recreates them
@@ -570,7 +571,8 @@ members(org, login, first_seen, last_seen)    -- PRIMARY KEY (org, login)
 -- Per repository, per metric: how far the sync got.
 sync_state(repo, metric, watermark, etag, oldest, last_sync_at,
            swept_to,                          -- runs: last full re-read
-           unfinished)                        -- items: sync stopped short
+           unfinished,                        -- items: sync stopped short
+           cursor)                            -- items: `after` to resume from
                                               -- PRIMARY KEY (repo, metric)
 -- Per repository, per metric: which day ranges are complete.
 coverage(repo, metric, from_day, to_day)      -- closed ranges, merged
@@ -689,6 +691,27 @@ already read, where the sync never stores it. A host whose `next` link carries n
 repository, and the sync carries on with its coverage unchanged; it
 does not page by timestamp to close that gap.
 
+A sync resumes by key too. Each stored page keeps, beside the
+watermark and in the same transaction, the `after` cursor of the `next`
+link that follows it, and the next sync requests the listing from
+that cursor as well as from its `since`. A watermark alone cannot
+resume inside a group of items sharing one second: a sync that reads
+part of a group larger than a run can read lists it from its start
+again, and every later run does the same. A page the host's `Date`
+places less than a minute past the second of its last item's
+`updated_at` keeps no cursor, and nor does any later page of the same
+run: an item read in that second can change again in it without its
+key advancing, a cursor past it would skip the change, and a resume
+from the watermark rereads it. The minute allows for the time between
+the read and the `Date`, which counts whole seconds, and for drift
+between the host's clocks. A sync that drains, and a scan that starts
+over, clear the cursor. One with none, as a host whose links carry
+none leaves, resumes from the watermark alone, and so does one whose
+cursor the host refuses with a `400` or `422` on its first request:
+the sync drops the cursor and requests the listing again without it.
+How long GitHub honours a cursor is not documented, so the sync keeps
+no expiry of its own.
+
 Coverage is all-or-nothing per sync: an item read late in the listing
 can carry an event from any earlier day, so a partly read listing
 proves no day complete. A listing read to its end, and nothing less,
@@ -717,7 +740,8 @@ repository's rows a mix of two reads under coverage the earlier one
 earned: an item reopened on a page read shows open, while one reopened
 on a page not reached still shows closed. Each page a sync stores sets
 `unfinished` on the repository's `items` sync state in the same
-transaction, and the sync that reads the listing to its end clears it.
+transaction, beside its cursor, and the sync that reads the listing to
+its end clears both.
 A sync that stops before storing a page leaves the mark unchanged,
 since it changed no row. No coverage goes: the read side (§6.5, §7.3,
 §8.5) gives the number of repositories in scope in this state, and the

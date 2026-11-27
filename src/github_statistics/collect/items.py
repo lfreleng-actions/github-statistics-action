@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -37,6 +39,11 @@ COVERAGE_METRICS = (ISSUES_METRIC, PULL_REQUESTS_METRIC)
 
 GHOST = "ghost"
 _OVERLAP = timedelta(seconds=1)
+# How long past its last item's second a page must be dated to keep its
+# cursor: the host dates a response when it sends it, to the second, after
+# the read, on a clock that may drift from the one stamping `updated_at`.
+_SETTLE = timedelta(minutes=1)
+_REFUSED_CURSOR = (400, 422)
 
 
 @dataclass(frozen=True)
@@ -57,15 +64,64 @@ class ItemSyncResult:
     unreadable: int | None = None
 
 
-def _by_position(response: httpx.Response) -> bool:
-    """Whether the page's ``next`` link pages by position, not by cursor.
+def _next_params(response: httpx.Response) -> httpx.QueryParams | None:
+    """The query of the page's ``next`` link, or ``None`` on the last page.
 
     GitHub's links carry an ``after`` cursor, which keeps the read by key
     while items move to the end of the listing (design §6.2).
     """
     link = response.links.get("next")
     target = link.get("url") if link else None
-    return bool(target) and "after" not in response.url.join(target).params
+    return response.url.join(target).params if target else None
+
+
+def _settled(response: httpx.Response, watermark: datetime, now: datetime) -> bool:
+    """Whether ``response`` was sent well after the second of ``watermark``.
+
+    An item read in the second of its ``updated_at`` can change again in
+    that second without that key advancing, so a cursor past it would
+    skip the change, where a resume one second before the watermark
+    rereads it. The host's ``Date`` header, from the clock that stamps
+    ``updated_at``, dates the page; ``now``, taken before the run's first
+    request, stands in without one. Either must lie ``_SETTLE`` past the
+    watermark, a margin for the time between the read and the ``Date``
+    and for drift between the host's clocks.
+    """
+    try:
+        read = parsedate_to_datetime(response.headers["date"])
+    except (KeyError, ValueError):
+        return watermark + _SETTLE <= now
+    # RFC 5322 reads "-0000" as no zone; an HTTP date is always UTC.
+    return watermark + _SETTLE <= read.replace(tzinfo=read.tzinfo or UTC)
+
+
+async def _listing(
+    transport: Transport,
+    store: Store,
+    state: SyncState,
+    path: str,
+    params: dict[str, Any],
+) -> AsyncIterator[tuple[list[Any], httpx.Response]]:
+    """The pages of ``path`` from ``params``, as `get_paged` yields them.
+
+    A ``400`` or ``422`` answering a first request that carries an
+    ``after`` cursor refuses the cursor: it is cleared from the stored
+    ``state``, and the listing is requested again from ``since`` alone.
+    """
+    pages = get_paged(transport, "/" + path, params)
+    try:
+        first = await anext(pages)
+    except httpx.HTTPStatusError as exc:
+        if "after" not in params or exc.response.status_code not in _REFUSED_CURSOR:
+            raise
+        log.info("the host refused the cursor of %s; resuming by time", state.repo)
+        store.set_sync_state(dataclasses.replace(state, cursor=None))
+        params = {name: value for name, value in params.items() if name != "after"}
+        pages = get_paged(transport, "/" + path, params)
+        first = await anext(pages)
+    yield first
+    async for page in pages:
+        yield page
 
 
 def _parse(text: str | None) -> datetime | None:
@@ -117,7 +173,8 @@ def _start(state: SyncState, window_start: date) -> tuple[SyncState, datetime]:
     mixing two reads are read again before a drained listing clears
     its mark. One with no watermark, as a refresh or the version 2
     migration leaves, keeps in ``oldest`` the point its unread items
-    lie after, and restarts from there when that is earlier.
+    lie after, and restarts from there when that is earlier. Starting
+    over drops the stored cursor with the watermark.
     """
     midnight = datetime.combine(window_start, time(), tzinfo=UTC)
     start = midnight - _OVERLAP
@@ -131,7 +188,7 @@ def _start(state: SyncState, window_start: date) -> tuple[SyncState, datetime]:
     )
     if state.watermark is None or behind or stale:
         restart = dataclasses.replace(
-            state, watermark=None, oldest=start, last_sync_at=None
+            state, watermark=None, oldest=start, last_sync_at=None, cursor=None
         )
         return restart, start
     return state, state.watermark - _OVERLAP
@@ -162,7 +219,10 @@ async def sync_items(
 
     The first sync lists from one second before ``window_start`` at
     00:00 UTC; later ones from one second before the stored watermark,
-    unless the window now starts before the days already listed. A
+    unless the window now starts before the days already listed, and
+    from the stored ``after`` cursor of a sync that stopped short. A
+    cursor the host refuses with a ``400`` or ``422`` is dropped and the
+    listing requested again from the watermark alone. A
     restart of a stored sync is saved before the first page; one for a
     wider window also marks the pull requests created before the
     earlier scan's start for review enrichment in the same transaction,
@@ -180,8 +240,11 @@ async def sync_items(
     left after the transport's retries marks the repository unreadable
     with no coverage change. Coverage of both metrics, over the window,
     is added only when the listing is read to its end. Storing a page
-    marks the sync unfinished, and reading to the end clears the mark,
-    so a sync stopped short leaves it while coverage stays as it was.
+    marks the sync unfinished and keeps the cursor of the page after it,
+    unless that page, or an earlier one of the run, was dated less than
+    a minute past the second of its last item's ``updated_at``, and
+    reading to the end clears both, so a sync
+    stopped short leaves them while coverage stays as it was.
     """
     key = f"{owner}/{repo}"
     saved = store.sync_state(key, ITEMS_METRIC)
@@ -202,12 +265,17 @@ async def sync_items(
         "per_page": 100,
         "since": since.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if state.cursor is not None:
+        params["after"] = state.cursor
     stored = pages = 0
     drained = warned = False
+    settled = True
     try:
-        async for page, response in get_paged(transport, "/" + path, params):
+        async for page, response in _listing(transport, store, state, path, params):
             pages += 1
-            if not warned and _by_position(response):
+            following = _next_params(response)
+            cursor = None if following is None else following.get("after")
+            if not warned and following is not None and cursor is None:
                 warned = True
                 log.warning(
                     "the host pages the items of %s by position, not by cursor,"
@@ -216,8 +284,15 @@ async def sync_items(
                 )
             items = [_item(key, data) for data in page]
             if items:
+                watermark = items[-1].updated_at
+                # A cursor past an unsettled page, as a later page's would
+                # be, skips what a resume by time would reread.
+                settled = settled and _settled(response, watermark, now)
                 state = dataclasses.replace(
-                    state, watermark=items[-1].updated_at, unfinished=True
+                    state,
+                    watermark=watermark,
+                    unfinished=True,
+                    cursor=cursor if settled else None,
                 )
                 store.store_item_page(items, state)
                 stored += len(items)
@@ -232,7 +307,9 @@ async def sync_items(
             log.warning("cannot read items of %s: HTTP %s", key, status)
             return ItemSyncResult(key, stored, pages, drained=False, unreadable=status)
     if drained:
-        done = dataclasses.replace(state, last_sync_at=now, unfinished=False)
+        done = dataclasses.replace(
+            state, last_sync_at=now, unfinished=False, cursor=None
+        )
         store.set_sync_state(done)
         _add_coverage(store, key, window_start, now)
     return ItemSyncResult(key, stored, pages, drained)

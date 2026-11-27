@@ -13,7 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = (
     """
@@ -86,6 +86,7 @@ _SCHEMA = (
         last_sync_at TEXT,
         swept_to TEXT,
         unfinished INTEGER NOT NULL DEFAULT 0,
+        cursor TEXT,
         PRIMARY KEY (repo, metric)
     )
     """,
@@ -122,7 +123,7 @@ _EARLIEST = (
 # before its first page leaves out, and each one starts unfinished with
 # no watermark and an `oldest` no later than its earliest stored update.
 # The next scan rereads every stored item before a drained listing
-# clears the mark.
+# clears the mark. Version 2 gains the item listing's resume cursor.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: (
         "ALTER TABLE sync_state ADD COLUMN unfinished INTEGER NOT NULL DEFAULT 0",
@@ -133,6 +134,7 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         f" oldest = COALESCE(MIN(oldest, {_EARLIEST}), oldest, {_EARLIEST})"
         " WHERE metric = 'items'",
     ),
+    2: ("ALTER TABLE sync_state ADD COLUMN cursor TEXT",),
 }
 
 TABLES = ("items", "reviews", "runs", "members", "sync_state", "coverage", "scope")
