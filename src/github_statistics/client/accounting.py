@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from .budget import Budget
+from .budget import Budget, Resource
 from .errors import BudgetExhaustedError, ClientError
 from .policy import int_header
 
@@ -47,7 +47,31 @@ class Ledger:
         Raises ``BudgetExhaustedError`` when none is left.
         """
         if rest and self.budget is not None and not self.budget.try_spend_rest():
-            raise BudgetExhaustedError(f"no REST budget left for {label}")
+            raise self.refusal(label)
+
+    def refusal(
+        self,
+        label: str,
+        *,
+        retry: bool = False,
+        resource: Resource = "rest",
+        spent: str | None = None,
+    ) -> BudgetExhaustedError:
+        """The error refusing a request, or its retry, for ``label``.
+
+        It names the time limit when the deadline, not ``resource``'s
+        count or rate limit, stopped it, so no refusal blames a budget
+        the clock ended. Otherwise it says ``spent``, or by default that
+        no REST budget is left.
+        """
+        if self.budget is not None and self.budget.stop_reason(resource) == "time":
+            verb = "retrying" if retry else "sending"
+            return BudgetExhaustedError(f"time limit reached; not {verb} {label}")
+        if spent is not None:
+            return BudgetExhaustedError(spent)
+        if retry:
+            return BudgetExhaustedError(f"no REST budget left to retry {label}")
+        return BudgetExhaustedError(f"no REST budget left for {label}")
 
     def refund(self, *, rest: bool) -> None:
         """Give back an attempt's REST request, for one that never left."""

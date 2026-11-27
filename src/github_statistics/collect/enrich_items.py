@@ -29,6 +29,8 @@ from github_statistics.client import (
 from github_statistics.client.graphql import TIMEOUT_STATUSES
 from github_statistics.store import Enrichment, Item, Review, Store
 
+from .common import last_point
+
 log = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
@@ -218,9 +220,12 @@ async def _page(
         try:
             raw = await _all_reviews(transport, node_id, reviews)
         except BudgetExhaustedError:
-            log.warning(
-                "GraphQL budget ran out paging the reviews of %s#%d;"
-                " it is read again next run",
+            budget = transport.budget
+            timed = budget is not None and budget.stop_reason("graphql") == "time"
+            log.log(
+                logging.INFO if timed else logging.WARNING,
+                "%s paging the reviews of %s#%d; it is read again next run",
+                "the time limit was reached" if timed else "GraphQL budget ran out",
                 owner.repo,
                 owner.number,
             )
@@ -326,7 +331,8 @@ async def enrich_items(
     with every pull request put aside after it: one whose pages exceed
     a whole run's budget is never completed. A budget smaller than the
     first pages queued can complete no item, an accepted limit that a
-    warning naming ``budget.graphql_points`` reports. An id that fails
+    warning naming ``budget.graphql_points`` reports; a time limit
+    reached first is logged at ``INFO`` instead. An id that fails
     alone is logged and left in ``failed`` for the next run.
     """
     items = [
@@ -391,7 +397,7 @@ async def enrich_items(
                 ready.append((node_id, marks, owner, list(reviews.get("nodes") or [])))
         save(ready)
         if last:
-            raise BudgetExhaustedError("one GraphQL point left; read one item")
+            raise last_point(transport, "item")
 
     def describe(ids: list[str]) -> str:
         """Name a batch in the log."""
@@ -410,11 +416,18 @@ async def enrich_items(
     )
     budget = transport.budget
     if remaining and not stored_items and budget and budget.graphql_exhausted:
-        log.warning(
-            "the GraphQL budget was too small to complete any item;"
-            " %d wait for the next run: raise budget.graphql_points",
-            len(remaining),
-        )
+        if budget.stop_reason("graphql") == "time":
+            log.info(
+                "the time limit was reached before any item was completed;"
+                " %d wait for the next run",
+                len(remaining),
+            )
+        else:
+            log.warning(
+                "the GraphQL budget was too small to complete any item;"
+                " %d wait for the next run: raise budget.graphql_points",
+                len(remaining),
+            )
     return EnrichResult(
         items=stored_items,
         reviews=stored_reviews,

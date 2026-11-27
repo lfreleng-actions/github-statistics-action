@@ -33,7 +33,7 @@ from github_statistics.client import (
     TransportError,
 )
 
-from .common import SERVER_ERROR, run_concurrently
+from .common import SERVER_ERROR, run_concurrently, stop_cause
 from .items import ItemSyncResult
 from .runs import _RunSync
 from .sweep import SweepResult
@@ -118,7 +118,7 @@ class Steps:
         try:
             value: T | None = await work
         except BudgetExhaustedError as exc:
-            log.info("%s step stopped: %s", step, exc)
+            log.info("%s step stopped: %s", step, stop_cause(self.transport, exc))
             self.stop(step)
             value = None
         except TransportError as exc:
@@ -175,7 +175,7 @@ class Steps:
         if self.exhausted is None:
             budget = self.transport.budget
             cause = "budget spent"
-            if budget is not None and budget.timed_out and not budget.stopped_by_count:
+            if budget is not None and budget.stop_reason() == "time":
                 cause = "time limit reached"
             log.info("%s in the %s step; the next run resumes", cause, step)
             self.exhausted = step

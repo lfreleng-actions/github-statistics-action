@@ -1052,7 +1052,12 @@ command's start and, once passed, makes the budget report itself spent,
 so requests in flight finish, no retry waits past it, the collectors
 stop the same way and the
 summary marks the step "time limit reached", or notes the limit reached
-later when a count stopped an earlier step first. A run that
+later when a count stopped an earlier step first. Every log line that
+would blame a spent budget asks the budget what stopped the resource
+it spends (`Budget.stop_reason`), not the run, since GraphQL steps
+run on after the REST count stops the REST ones: when the clock did,
+it names the time limit, at `INFO` rather than `WARNING`, and gives
+no advice to raise a count, which cannot help. A run that
 exhausts its budget exits zero with a notice; coverage says what
 remains. Steps 3 and 4 are still never starved by step 5, which
 step 6 follows rather than replaces, so the most recent days are always

@@ -143,8 +143,10 @@ async def test_never_reads_the_private_member_list() -> None:
 
 
 @respx.mock
-async def test_a_spent_budget_keeps_the_stored_lists() -> None:
-    """A spent budget ends the step and keeps every stored list."""
+async def test_a_spent_budget_keeps_the_stored_lists(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A spent budget ends the step, warns and keeps every stored list."""
     from github_statistics.client import Budget, BudgetExhaustedError, Transport
     from github_statistics.collect import sync_members
 
@@ -160,7 +162,7 @@ async def test_a_spent_budget_keeps_the_stored_lists() -> None:
 
     budget = Budget(rest=1)
     async with Transport(None, sleep=_instant, budget=budget) as transport:
-        with pytest.raises(BudgetExhaustedError):
+        with pytest.raises(BudgetExhaustedError), caplog.at_level(logging.INFO):
             await sync_members(
                 transport,
                 store,
@@ -172,3 +174,33 @@ async def test_a_spent_budget_keeps_the_stored_lists() -> None:
 
     assert _logins(store, "acme") == ["bob"]
     assert _logins(store, "other") == ["carol"]
+    [record] = [r for r in caplog.records if "kept the stored" in r.getMessage()]
+    assert "no REST budget left" in record.getMessage()
+    assert record.levelno == logging.WARNING
+
+
+async def test_the_time_limit_keeps_the_stored_lists_at_info(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A run past its time limit names the limit at INFO, not a budget."""
+    from github_statistics.client import Budget, BudgetExhaustedError, Transport
+    from github_statistics.collect import sync_members
+
+    store = _store()
+    store.replace_members("acme", ["bob"], date(2026, 1, 1))
+    budget = Budget(deadline=1.0, clock=lambda: 2.0)
+    async with Transport(None, sleep=_instant, budget=budget) as transport:
+        with pytest.raises(BudgetExhaustedError), caplog.at_level(logging.INFO):
+            await sync_members(
+                transport,
+                store,
+                ["acme"],
+                owner="acme",
+                owner_type="Organization",
+                today=TODAY,
+            )
+
+    assert _logins(store, "acme") == ["bob"]
+    [record] = [r for r in caplog.records if "kept the stored" in r.getMessage()]
+    assert record.getMessage() == "kept the stored members of acme: time limit reached"
+    assert record.levelno == logging.INFO

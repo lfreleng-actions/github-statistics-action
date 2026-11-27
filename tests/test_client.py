@@ -481,6 +481,25 @@ def test_budget_records_whether_a_count_stopped_it_before_the_deadline() -> None
     assert counted.stopped_by_count
 
 
+def test_budget_stop_reason_names_what_stopped_it_first() -> None:
+    """The deadline is the reason only when no count stopped the run first."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    timed = Budget(deadline=60.0, clock=lambda: now[0])
+    rest = Budget(rest=1, deadline=60.0, clock=lambda: now[0])
+    points = Budget(graphql_points=1, deadline=60.0, clock=lambda: now[0])
+    assert timed.stop_reason() is None
+    assert rest.try_spend_rest() and not rest.try_spend_rest()
+    assert not points.try_spend_graphql(2)
+
+    now[0] = 60.0
+
+    assert timed.stop_reason() == "time"
+    assert rest.stop_reason() == "rest"
+    assert points.stop_reason() == "graphql"
+
+
 async def test_a_queued_query_holding_every_point_is_not_a_count_stop() -> None:
     """Points a query holds, then gives back unsent at the deadline, stop nothing."""
     import asyncio
@@ -538,6 +557,91 @@ async def test_graphql_waiting_or_retrying_past_the_deadline_is_not_sent() -> No
                 await queued
     assert route.call_count == 1
     assert budget.graphql_spent == 1
+
+
+@pytest.mark.parametrize("retried", [False, True])
+async def test_graphql_refused_past_the_deadline_names_the_time_limit(
+    retried: bool,
+) -> None:
+    """A query, or its retry, refused at the deadline names it, not the budget."""
+    from github_statistics.client import Budget, BudgetExhaustedError, graphql
+
+    now = [0.0 if retried else 2.0]
+    budget = Budget(rest=0, deadline=1.0, clock=lambda: now[0])
+    assert budget.rest_exhausted
+
+    def fail_late(_request: httpx.Request) -> httpx.Response:
+        now[0] = 2.0
+        return httpx.Response(502)
+
+    with respx.mock:
+        route = respx.post(f"{API}/graphql").mock(side_effect=fail_late)
+        async with _transport(Sleeper(), budget=budget) as transport:
+            with pytest.raises(
+                BudgetExhaustedError,
+                match="^time limit reached; not sending POST /graphql$",
+            ):
+                await graphql(transport, "query { x }", cost_estimate=1)
+    assert route.call_count == int(retried)
+
+
+async def test_rest_refused_past_the_deadline_names_the_time_limit() -> None:
+    """A REST request refused at the deadline says so, not that the budget ran out."""
+    from github_statistics.client import Budget, BudgetExhaustedError
+
+    budget = Budget(deadline=1.0, clock=lambda: 2.0)
+    with respx.mock:
+        route = respx.get(f"{API}/x").respond(200, json=[])
+        async with _transport(Sleeper(), budget=budget) as transport:
+            with pytest.raises(
+                BudgetExhaustedError, match="^time limit reached; not sending GET /x$"
+            ):
+                await transport.request("GET", "/x")
+    assert route.call_count == 0
+
+
+async def test_rest_retry_refused_past_the_deadline_names_the_time_limit() -> None:
+    """A retry refused at the deadline names it, with REST requests still left."""
+    from github_statistics.client import Budget, BudgetExhaustedError
+
+    now = [0.0]
+    budget = Budget(rest=10, deadline=1.0, clock=lambda: now[0])
+
+    def fail_late(request: httpx.Request) -> httpx.Response:
+        now[0] = 2.0
+        return httpx.Response(502)
+
+    with respx.mock:
+        route = respx.get(f"{API}/x").mock(side_effect=fail_late)
+        async with _transport(Sleeper(), budget=budget) as transport:
+            with pytest.raises(
+                BudgetExhaustedError, match="^time limit reached; not retrying GET /x$"
+            ):
+                await transport.request("GET", "/x")
+    assert route.call_count == 1
+    assert budget.rest_spent == 1
+
+
+def test_budget_stop_reason_of_one_resource_names_the_time_limit() -> None:
+    """A resource the clock stopped after the other's count ran out names it."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    rest = Budget(rest=0, deadline=60.0, clock=lambda: now[0])
+    points = Budget(deadline=60.0, clock=lambda: now[0])
+    assert rest.rest_exhausted
+    points.exhaust_graphql()
+    assert rest.stop_reason("graphql") is None
+
+    now[0] = 60.0
+
+    assert rest.stop_reason() == "rest"
+    assert (rest.stop_reason("rest"), rest.stop_reason("graphql")) == ("rest", "time")
+    assert points.stop_reason() == "graphql"
+    assert (points.stop_reason("graphql"), points.stop_reason("rest")) == (
+        "graphql",
+        "time",
+    )
 
 
 async def test_budget_seeded_free_and_charged_per_request() -> None:

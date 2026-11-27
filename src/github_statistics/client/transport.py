@@ -261,9 +261,8 @@ class Transport:
         self._refuse_rejected("POST /graphql")
         budget = self.budget
         if budget is not None and not budget.try_spend_graphql(estimate):
-            raise BudgetExhaustedError(
-                f"no GraphQL budget left for a query costing {estimate}"
-            )
+            spent = f"no GraphQL budget left for a query costing {estimate}"
+            raise self._ledger.refusal("POST /graphql", resource="graphql", spent=spent)
         target = self.resolve(self.graphql_url)
         call = _Call(target, self._headers(None), body, graphql=True)
         progress = _Progress()
@@ -355,9 +354,7 @@ class Transport:
             if discard is not None:
                 await discard.aclose()
             if chargeable and self.rest_exhausted:
-                raise BudgetExhaustedError(
-                    f"no REST budget left to retry {method} {target.path}"
-                )
+                raise self._ledger.refusal(f"{method} {target.path}", retry=True)
             progress.retries += 1
             progress.waited += delay
             self.stats.retries[kind] += 1
@@ -393,12 +390,11 @@ class Transport:
         try:
             self._refuse_rejected(label)
             budget = self.budget
-            if self._cooldown.stopped(resource) or (
-                call.graphql and budget is not None and budget.graphql_stopped
-            ):
-                raise BudgetExhaustedError(
-                    f"the {resource} rate limit is spent; not sending {label}"
-                )
+            spent = f"the {resource} rate limit is spent; not sending {label}"
+            if self._cooldown.stopped(resource):
+                raise BudgetExhaustedError(spent)
+            if call.graphql and budget is not None and budget.graphql_stopped:
+                raise self._ledger.refusal(label, resource="graphql", spent=spent)
             self._ledger.reserve(label, rest=chargeable)
             self.stats.requests += 1
             try:

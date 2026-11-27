@@ -236,6 +236,35 @@ async def test_last_point_reads_one_run() -> None:
 
 
 @respx.mock
+async def test_last_point_read_past_the_deadline_names_the_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A last-point read the clock outlasts names the time limit, not the point."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    runs = [_run(n, created=datetime(2026, 3, n, tzinfo=UTC)) for n in (1, 2)]
+    answer = _data({"WFR_1": _node(1, 1), "WFR_2": _node(2, 2)})
+
+    def read_then_time_out(variables: dict[str, Any]) -> httpx.Response:
+        now[0] = 2.0
+        return answer(variables)
+
+    route = _serve(read_then_time_out)
+    budget = Budget(graphql_points=1, deadline=1.0, clock=lambda: now[0])
+    with _store(*runs) as store:
+        with caplog.at_level(logging.INFO):
+            result = await _enrich(store, budget)
+
+        assert _ids(route) == ["WFR_2"]
+        assert result.runs == 1 and result.remaining == ("WFR_1",)
+        assert "point left" not in caplog.text
+        [record] = [r for r in caplog.records if "time limit" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@respx.mock
 async def test_budget_completing_no_run_names_the_setting(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -249,6 +278,62 @@ async def test_budget_completing_no_run_names_the_setting(
         assert route.call_count == 0
         assert result.runs == 0 and result.remaining == ("WFR_1",)
         assert caplog.text.count("budget.graphql_points") == 1
+
+
+@respx.mock
+@pytest.mark.parametrize("rest_first", [False, True])
+async def test_time_limit_counting_no_run_names_the_limit(
+    caplog: pytest.LogCaptureFixture, rest_first: bool
+) -> None:
+    """The time limit is named even when the REST count ran out before it."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    budget = Budget(rest=0 if rest_first else 1, deadline=1.0, clock=lambda: now[0])
+    assert budget.rest_exhausted is rest_first
+    now[0] = 2.0
+    route = _serve(_data({"WFR_1": _node(1, 1)}))
+    with _store(_run(1)) as store:
+        with caplog.at_level(logging.INFO):
+            result = await _enrich(store, budget)
+
+        assert route.call_count == 0
+        assert result.remaining == ("WFR_1",)
+        assert "budget" not in caplog.text
+        counted = "time limit was reached before any run's jobs were counted; 1 wait"
+        [record] = [r for r in caplog.records if counted in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@respx.mock
+@pytest.mark.parametrize("rest_first", [False, True])
+async def test_time_limit_after_a_counted_batch_names_the_limit(
+    caplog: pytest.LogCaptureFixture, rest_first: bool
+) -> None:
+    """A batch the clock stops after one was counted names the time limit."""
+    from github_statistics.client import Budget
+
+    now = [0.0]
+    answer = _data({f"WFR_{i}": _node(i, 1) for i in range(1, 52)})
+
+    def first_batch_then_time_out(variables: dict[str, Any]) -> httpx.Response:
+        now[0] = 2.0
+        return answer(variables)
+
+    route = _serve(first_batch_then_time_out)
+    budget = Budget(rest=0 if rest_first else 1, deadline=1.0, clock=lambda: now[0])
+    assert budget.rest_exhausted is rest_first
+    with _store(*(_run(i) for i in range(1, 52))) as store:
+        with caplog.at_level(logging.INFO):
+            result = await _enrich(store, budget)
+
+        assert route.call_count == 1
+        assert result.runs == 50 and len(result.remaining) == 1
+        assert "budget" not in caplog.text
+        [record] = [r for r in caplog.records if "time limit" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 @respx.mock

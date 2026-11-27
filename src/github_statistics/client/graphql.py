@@ -236,7 +236,9 @@ async def batched(
     included, batching stops: the results so far return, with the chunk
     that met it and every chunk not yet fetched in ``remaining``, so a
     collector keeps its work and persistent timeouts cannot outlast the
-    run. Chunks that succeed, however slow, are not bounded.
+    run. Chunks that succeed, however slow, are not bounded. A stop on
+    ``BudgetExhaustedError`` logs its message, which names the time
+    limit when the clock, not a count, refused the chunk.
     """
     if size < 1:
         raise ValueError(f"batch size must be at least 1, not {size}")
@@ -250,8 +252,12 @@ async def batched(
         started = clock()
         try:
             out.results.append(await fetch(chunk))
-        except BudgetExhaustedError:
-            log.info("budget exhausted at %s", describe(chunk))
+        except BudgetExhaustedError as exc:
+            log.info(
+                "stopped at %s (%s); the rest wait for the next run",
+                describe(chunk),
+                exc,
+            )
             out.remaining = chunk + [i for rest in reversed(pending) for i in rest]
             return out
         except GraphQLError as exc:
