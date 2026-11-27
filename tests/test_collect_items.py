@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import importlib
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -64,20 +64,75 @@ def _serve(pages: dict[str, list[list[dict[str, Any]]]]) -> respx.Route:
     """Mock the listing: ``pages[since]`` in order, each linked to the next.
 
     Each link carries an ``after`` cursor and a ``page`` number, as
-    GitHub's do; the cursor decides the page.
+    GitHub's do; the cursor names its listing and decides the page.
     """
 
     def respond(request: httpx.Request) -> httpx.Response:
-        chunks = pages[request.url.params["since"]]
+        since = request.url.params["since"]
         after = request.url.params.get("after")
-        page = 1 if after is None else int(after.removeprefix("cursor:")) + 1
+        page = 1
+        if after is not None:
+            since, _, read = after.rpartition("|")
+            page = int(read) + 1
+        chunks = pages[since]
         headers = {}
         if page < len(chunks):
             following = request.url.copy_merge_params(
-                {"after": f"cursor:{page}", "page": page + 1}
+                {"after": f"{since}|{page}", "page": page + 1}
             )
             headers["link"] = f'<{following}>; rel="next"'
         return httpx.Response(200, json=chunks[page - 1], headers=headers)
+
+    return respx.get(LISTING).mock(side_effect=respond)
+
+
+def _keyset(
+    listing: dict[int, datetime],
+    *,
+    cursors: bool = True,
+    refused: set[str] | None = None,
+    closed: dict[int, datetime] | None = None,
+    sent: list[datetime] | None = None,
+) -> respx.Route:
+    """Mock the listing read by key: ``listing`` maps numbers to ``updated_at``.
+
+    Pages hold two items, ordered by ``updated_at`` then number. With
+    ``cursors``, each link carries an ``after`` cursor naming the last
+    item, as GitHub's do, and that cursor decides the page; without,
+    a ``page`` number alone. A cursor in ``refused`` is answered ``422``
+    once, as a stale one would be; the host honours it when it issues it
+    again. ``closed`` maps numbers to ``closed_at``, and ``sent`` dates
+    each response with a ``Date`` header, in order, the last repeating.
+    """
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        after = params.get("after")
+        if refused and after in refused:
+            refused.discard(after)
+            return httpx.Response(422, json={"message": "Validation Failed"})
+        since = datetime.fromisoformat(params["since"])
+        rows = sorted((at, n) for n, at in listing.items() if at >= since)
+        page = int(params.get("page", "1"))
+        if after is not None:
+            at, _, n = after.rpartition(",")
+            rows = [row for row in rows if row > (datetime.fromisoformat(at), int(n))]
+        elif not cursors:
+            rows = rows[2 * (page - 1) :]
+        chunk, headers = rows[:2], {}
+        if sent:
+            at = sent.pop(0) if len(sent) > 1 else sent[0]
+            headers["date"] = at.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        if len(rows) > 2:
+            query: dict[str, Any] = {"page": page + 1}
+            if cursors:
+                query["after"] = f"{chunk[-1][0].isoformat()},{chunk[-1][1]}"
+            headers["link"] = f'<{request.url.copy_merge_params(query)}>; rel="next"'
+        return httpx.Response(
+            200,
+            json=[_listed(n, at, closed=(closed or {}).get(n)) for at, n in chunk],
+            headers=headers,
+        )
 
     return respx.get(LISTING).mock(side_effect=respond)
 
@@ -311,7 +366,8 @@ async def test_an_unfinished_sync_resumes_when_the_window_moves_past_it(
             )
 
         assert route.calls[-1].request.url.params["since"] == resume
-        assert result.drained is True and result.items == 2
+        # Without a refresh the stored cursor skips the item already reread.
+        assert result.drained is True and result.items == (2 if refresh else 1)
         rows = store.items_between(WINDOW, date(2026, 3, 9))
         assert [item.closed_at for item in rows] == [None, None]
         assert store.sync_state("acme/a", "items").unfinished is False
@@ -331,7 +387,6 @@ async def test_a_migrated_store_rereads_its_items_before_the_mark_clears(
     reopening, in the same second, the listing has not returned.
     """
     import sqlite3
-    from datetime import timedelta
 
     from github_statistics.client import Transport
     from github_statistics.store import Item, Store, SyncState
@@ -347,6 +402,7 @@ async def test_a_migrated_store_rereads_its_items_before_the_mark_clears(
             start = datetime(2026, 3, 5, 23, 59, 59, tzinfo=UTC)
             store.set_sync_state(SyncState("acme/a", "items", oldest=start))
     connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE sync_state DROP COLUMN cursor")
     connection.execute("ALTER TABLE sync_state DROP COLUMN unfinished")
     connection.execute("PRAGMA user_version = 1")
     connection.commit()
@@ -797,3 +853,134 @@ async def test_a_next_link_without_a_cursor_warns_once_and_drains(
         assert "acme/a" in warnings[0].getMessage()
         assert "position" in warnings[0].getMessage()
         assert _coverage(store, "issues") == [(WINDOW, date(2026, 3, 9))]
+
+
+@respx.mock
+async def test_runs_of_one_request_each_read_through_a_same_second_group() -> None:
+    from github_statistics.client import Budget
+
+    group = _at(5)
+    _keyset({**dict.fromkeys(range(1, 6), group), 6: _at(6)})
+    with _store() as store:
+        first = await _sync(store, budget=Budget(rest=1))
+        state = store.sync_state("acme/a", "items")
+        assert first.drained is False
+        assert (state.cursor, state.unfinished) == (f"{group.isoformat()},2", True)
+
+        assert (await _sync(store, budget=Budget(rest=1))).drained is False
+        assert (await _sync(store, budget=Budget(rest=1))).drained is True
+
+        assert store.counts()["items"] == 6
+        state = store.sync_state("acme/a", "items")
+        assert (state.watermark, state.cursor, state.unfinished) == (
+            _at(6),
+            None,
+            False,
+        )
+
+
+@respx.mock
+async def test_an_item_of_the_group_updated_between_runs_loses_no_other() -> None:
+    from github_statistics.client import Budget
+
+    listing = dict.fromkeys(range(1, 5), _at(5))
+    _keyset(listing)
+    with _store() as store:
+        assert (await _sync(store, budget=Budget(rest=1))).drained is False
+        listing[1] = _at(6)
+
+        assert (await _sync(store)).drained is True
+
+        items = store.items_between(WINDOW, date(2026, 3, 9))
+        stored = {item.number: item.updated_at for item in items}
+        assert stored == {1: _at(6), 2: _at(5), 3: _at(5), 4: _at(5)}
+
+
+@respx.mock
+async def test_a_host_without_cursors_resumes_from_the_watermark() -> None:
+    from github_statistics.client import Budget
+
+    route = _keyset({n: _at(n) for n in (1, 2, 3)}, cursors=False)
+    with _store() as store:
+        assert (await _sync(store, budget=Budget(rest=1))).drained is False
+        assert store.sync_state("acme/a", "items").cursor is None
+
+        assert (await _sync(store)).drained is True
+
+        params = route.calls[-1].request.url.params
+        assert "after" not in params
+        assert params["since"] == "2026-03-02T11:59:59Z"
+        assert store.counts()["items"] == 3
+
+
+@respx.mock
+async def test_a_refused_cursor_falls_back_to_the_watermark() -> None:
+    from github_statistics.client import Budget
+
+    refused: set[str] = set()
+    route = _keyset({**dict.fromkeys(range(1, 4), _at(5)), 4: _at(6)}, refused=refused)
+    with _store() as store:
+        assert (await _sync(store, budget=Budget(rest=1))).drained is False
+        refused.add(store.sync_state("acme/a", "items").cursor)
+
+        result = await _sync(store)
+
+        assert result.drained is True and result.unreadable is None
+        sent = ["after" in call.request.url.params for call in route.calls]
+        assert sent == [False, True, False, True]
+        assert route.calls[1].response.status_code == 422
+        assert store.counts()["items"] == 4
+        assert store.sync_state("acme/a", "items").cursor is None
+
+
+@respx.mock
+async def test_a_page_read_in_its_last_second_rereads_it_by_time() -> None:
+    from github_statistics.client import Budget
+
+    group, closed = _at(5), dict[int, datetime]()
+    route = _keyset(dict.fromkeys(range(1, 5), group), closed=closed, sent=[group])
+    with _store() as store:
+        assert (await _sync(store, budget=Budget(rest=1))).drained is False
+        assert store.sync_state("acme/a", "items").cursor is None
+        closed[1] = group
+
+        assert (await _sync(store)).drained is True
+
+        assert "after" not in route.calls[1].request.url.params
+        rows = store.items_between(WINDOW, date(2026, 3, 9))
+        assert {item.number: item.closed_at for item in rows}[1] == group
+
+
+@pytest.mark.parametrize(("late", "kept"), [(1, False), (60, True)])
+@respx.mock
+async def test_a_page_keeps_its_cursor_only_a_minute_past_its_second(
+    late: int, kept: bool
+) -> None:
+    from github_statistics.client import Budget
+
+    group = _at(5)
+    sent = [group + timedelta(seconds=late)]
+    _keyset(dict.fromkeys(range(1, 5), group), sent=sent)
+    with _store() as store:
+        assert (await _sync(store, budget=Budget(rest=1))).drained is False
+        assert (store.sync_state("acme/a", "items").cursor is not None) is kept
+
+
+@respx.mock
+async def test_a_settled_page_keeps_no_cursor_past_an_unsettled_one() -> None:
+    from github_statistics.client import Budget
+
+    group, closed = _at(5), dict[int, datetime]()
+    sent = [group, group + timedelta(minutes=2)]
+    route = _keyset(dict.fromkeys(range(1, 7), group), closed=closed, sent=sent)
+    with _store() as store:
+        assert (await _sync(store, budget=Budget(rest=2))).drained is False
+        assert store.sync_state("acme/a", "items").cursor is None
+        # Item 1, read on page 1, changes again in its second.
+        closed[1] = group
+
+        assert (await _sync(store)).drained is True
+
+        assert "after" not in route.calls[2].request.url.params
+        rows = store.items_between(WINDOW, date(2026, 3, 9))
+        assert {item.number: item.closed_at for item in rows}[1] == group

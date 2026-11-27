@@ -96,8 +96,8 @@ class Store(AggregateStore):
     def store_item_page(self, items: Iterable[Item], state: SyncState) -> None:
         """Upsert one listing page of ``items`` and ``state`` in one transaction.
 
-        The watermark in ``state`` then never runs ahead of the items it
-        describes, nor falls behind them (design §6.5). An item listed
+        The watermark and cursor in ``state`` then never run ahead of the
+        items they describe, nor fall behind them (design §6.5). An item listed
         with ``updated_at`` equal to its ``reviews_read_at`` has that
         marker cleared: both hold whole seconds, so an update in the
         second of the read cannot be told from one before it, and

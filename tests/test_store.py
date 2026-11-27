@@ -630,13 +630,14 @@ def test_a_version_1_store_migrates_keeping_every_row(tmp_path: Path) -> None:
         store.replace_members("acme", ["alice"], _day(1))
         before = store.counts()
     connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE sync_state DROP COLUMN cursor")
     connection.execute("ALTER TABLE sync_state DROP COLUMN unfinished")
     connection.execute("PRAGMA user_version = 1")
     connection.commit()
     connection.close()
 
     with Store(path) as store:
-        assert (store.schema_version(), SCHEMA_VERSION) == (2, 2)
+        assert (store.schema_version(), SCHEMA_VERSION) == (3, 3)
         assert 0 not in before.values()
         assert store.counts() == {**before, "sync_state": before["sync_state"] + 1}
         state = store.sync_state("acme/a", "issues")
@@ -648,12 +649,51 @@ def test_a_version_1_store_migrates_keeping_every_row(tmp_path: Path) -> None:
         assert store.unfinished("items", _day(1), _day(2)) == ["acme/a", "acme/b"]
 
 
+def test_a_version_2_store_gains_the_cursor_keeping_every_row(
+    tmp_path: Path,
+) -> None:
+    """A version-2 store migrates in place, rows and unfinished marks kept."""
+    from github_statistics.store import SCHEMA_VERSION, Store, SyncState
+
+    path = tmp_path / "stats.sqlite"
+    with Store(path) as store:
+        _fill(store, "acme/a", 1)
+        marked = SyncState("acme/a", "items", watermark=_at(6), unfinished=True)
+        store.set_sync_state(marked)
+        store.replace_members("acme", ["alice"], _day(1))
+        before = store.counts()
+    connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE sync_state DROP COLUMN cursor")
+    connection.execute("PRAGMA user_version = 2")
+    connection.commit()
+    connection.close()
+
+    with Store(path) as store:
+        assert (store.schema_version(), SCHEMA_VERSION) == (3, 3)
+        assert 0 not in before.values()
+        assert store.counts() == before
+        assert store.sync_state("acme/a", "items") == marked
+
+
+def test_purge_repository_drops_a_stored_cursor() -> None:
+    """The cursor lives in the sync state row, which a purge deletes."""
+    from github_statistics.store import SyncState
+
+    with _store() as store:
+        store.set_sync_state(SyncState("acme/a", "items", cursor="c", unfinished=True))
+        assert store.sync_state("acme/a", "items").cursor == "c"
+
+        store.purge_repository("acme/a")
+
+        assert store.sync_state("acme/a", "items") is None
+
+
 def test_unfinished_names_marked_repositories_in_scope(tmp_path: Path) -> None:
     """A new store holds the mark; only repositories in scope count."""
     from github_statistics.store import Store, SyncState
 
     with Store(tmp_path / "stats.sqlite") as store:
-        assert store.schema_version() == 2
+        assert store.schema_version() == 3
         for repo in ("acme/a", "acme/b", "acme/c"):
             store.enter_scope(repo, _day(3))
             store.set_sync_state(SyncState(repo, "items", unfinished=repo != "acme/c"))
