@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2026 The Linux Foundation
 """The store's tables, their version stamp, and read-only inspection.
 
-The store is a cache of public data that the tool can always re-read
-from GitHub, so it favours simplicity over migrations: a schema version
-mismatch drops every table and recreates them empty.
+A store stamped with an older version the code knows is migrated in
+place, keeping its rows; one with a version the code does not know,
+newer or with no migration path, is dropped and recreated empty.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = (
     """
@@ -85,6 +85,7 @@ _SCHEMA = (
         oldest TEXT,
         last_sync_at TEXT,
         swept_to TEXT,
+        unfinished INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (repo, metric)
     )
     """,
@@ -106,6 +107,33 @@ _SCHEMA = (
     )
     """,
 )
+
+# One second before a repository's earliest stored update, as the
+# collector overlaps ``since``, which may exclude an update in that second.
+_EARLIEST = (
+    "(SELECT strftime('%Y-%m-%dT%H:%M:%SZ', MIN(updated_at), '-1 second')"
+    " FROM items WHERE items.repo = sync_state.repo)"
+)
+
+# The statements that bring a store at each version to the next. A
+# version-1 store cannot tell whether an item sync stopped short, nor
+# which earlier scan its rows came from, so every repository with items
+# gets an item sync state, which a version-1 `collect --refresh` stopped
+# before its first page leaves out, and each one starts unfinished with
+# no watermark and an `oldest` no later than its earliest stored update.
+# The next scan rereads every stored item before a drained listing
+# clears the mark.
+MIGRATIONS: dict[int, tuple[str, ...]] = {
+    1: (
+        "ALTER TABLE sync_state ADD COLUMN unfinished INTEGER NOT NULL DEFAULT 0",
+        "INSERT INTO sync_state (repo, metric) SELECT DISTINCT repo, 'items'"
+        " FROM items WHERE repo NOT IN"
+        " (SELECT repo FROM sync_state WHERE metric = 'items')",
+        "UPDATE sync_state SET unfinished = 1, watermark = NULL,"
+        f" oldest = COALESCE(MIN(oldest, {_EARLIEST}), oldest, {_EARLIEST})"
+        " WHERE metric = 'items'",
+    ),
+}
 
 TABLES = ("items", "reviews", "runs", "members", "sync_state", "coverage", "scope")
 REPOSITORY_TABLES = ("items", "reviews", "runs", "sync_state", "coverage", "scope")
@@ -130,6 +158,24 @@ def create_schema(connection: sqlite3.Connection) -> None:
         connection.execute(f'DROP TABLE "{quoted}"')
     for statement in _SCHEMA:
         connection.execute(statement)
+    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def migrate_schema(connection: sqlite3.Connection, version: int) -> None:
+    """Bring a store at ``version`` to `SCHEMA_VERSION`, keeping its rows.
+
+    Applies each version's `MIGRATIONS` in order, then stamps the
+    version. A version with no path to `SCHEMA_VERSION`, newer than it
+    or never stamped, gets `create_schema` instead. Call inside a
+    transaction, as for `create_schema`.
+    """
+    path = range(version, SCHEMA_VERSION)
+    if not path or any(step not in MIGRATIONS for step in path):
+        create_schema(connection)
+        return
+    for step in path:
+        for statement in MIGRATIONS[step]:
+            connection.execute(statement)
     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

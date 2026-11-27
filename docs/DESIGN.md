@@ -530,11 +530,22 @@ dashes stripped, so no owner name can leave the cache directory. Every
 write runs in one explicit transaction, so a failure part-way through a
 sync leaves the previous state. A write made inside an open transaction
 runs under a savepoint, so its failure undoes that write alone. The
-schema version lives in `PRAGMA user_version`; on a mismatch the store
-drops every table and recreates them in one transaction, with no
-migrations, since GitHub can supply every row again. The rebuild takes
+schema version lives in `PRAGMA user_version`. Opening a store stamped
+with an older version the code knows migrates it in place: each
+version's steps in `MIGRATIONS` (version 1 to 2 adds
+`sync_state.unfinished`; a version-1 store cannot say whether an item
+sync drained, nor which scan its rows came from, so every repository
+with items gets an `items` sync state, which a refresh stopped before
+its first page leaves out, and each one starts unfinished, with no
+watermark and an `oldest` no later than one second before its earliest
+stored `updated_at`, so its next scan rereads every stored item that
+may have changed since) run in order in
+one transaction, which then stamps the new version, so every row stays
+and no cold start follows. A version the code does not know, newer than
+its own or with no migration path, drops every table and recreates them
+instead, since GitHub can supply every row again. Either change takes
 the write lock first and checks the version again under it, so a store
-another process has rebuilt keeps its rows. Timestamps are ISO-8601 UTC
+another process has migrated keeps its rows. Timestamps are ISO-8601 UTC
 text and days `YYYY-MM-DD`. Tables:
 
 ```sql
@@ -558,7 +569,8 @@ runs(id PRIMARY KEY, node_id, repo, workflow_path, event, status,
 members(org, login, first_seen, last_seen)    -- PRIMARY KEY (org, login)
 -- Per repository, per metric: how far the sync got.
 sync_state(repo, metric, watermark, etag, oldest, last_sync_at,
-           swept_to)                          -- runs: last full re-read
+           swept_to,                          -- runs: last full re-read
+           unfinished)                        -- items: sync stopped short
                                               -- PRIMARY KEY (repo, metric)
 -- Per repository, per metric: which day ranges are complete.
 coverage(repo, metric, from_day, to_day)      -- closed ranges, merged
@@ -1829,7 +1841,7 @@ so.
 | Rate limit mid-run                  | Transport backs off; budget guard stops before the reserve | Watermarks hold; next run continues; Slack when the job fails           |
 | One repository `403`/`5xx`          | Repository unreadable for the run; its days become partial | Hatched columns; coverage note; optional degradation notice             |
 | Cache evicted and artifact expired  | Cold start                                                 | Budgeted backfill across runs; charts fill in from the newest day back  |
-| Store corrupt or schema bumped      | Store dropped and recreated (GSR behaviour)                | Same as cold start                                                      |
+| Store corrupt or schema unknown     | Store dropped and recreated (GSR behaviour)                | Same as cold start                                                      |
 | Bot list missing a new app          | Counted as an external bot and named as unclassified       | `doctor`/run warning names the login; place it in config; re-render     |
 | Repository turns private            | It leaves the scope on the next run                        | The run deletes its rows; charts, tables and exports drop it            |
 | Scope names a private repository    | Skipped, with a warning that names it                      | None needed: out of scope by design (§5)                                |
